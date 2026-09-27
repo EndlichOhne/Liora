@@ -175,6 +175,7 @@ test("legacy png + site.json type still needs the X feed card", () => {
 });
 
 test("siteDeclaresOgTypeGame reads the site contract", () => {
+  const root = makeWorkspace({});
   assert.equal(siteDeclaresOgTypeGame({ type: "x:game" }), true);
   assert.equal(siteDeclaresOgTypeGame({ type: "website" }), false);
   assert.equal(siteDeclaresOgTypeGame({}), false);
@@ -321,7 +322,7 @@ test("SKILL.md and AGENTS.md name the marker path and bound this script uses", (
 const PROHIBITION_SECTIONS = [
   {
     rel: ".grok/skills/og/SKILL.md",
-    label: '\u00a7 "Brand-asset pass"',
+    label: '§ "Brand-asset pass"',
     from: "## Brand-asset pass:",
     until: /\n## /,
   },
@@ -348,7 +349,7 @@ test("the sections that own the brand-task prohibition never affirm a wait", () 
   // nearby: "So: wait_tasks before the final verify, but never get_task_output"
   // keeps a negation in the sentence while instructing exactly the wait.
   const connectors = /(?:\s|[/,;]|\band\b|\bor\b|\bwait_tasks\b|\bget_task_output\b)+$/i;
-  const negation = /\b(?:no|never|not|don['\u2019]t)$/i;
+  const negation = /\b(?:no|never|not|don['’]t)$/i;
   for (const section of PROHIBITION_SECTIONS) {
     const where = `${section.rel} ${section.label}`;
     const prose = prohibitionSection(section);
@@ -357,7 +358,7 @@ test("the sections that own the brand-task prohibition never affirm a wait", () 
     for (const match of mentions) {
       const before = prose.slice(0, match.index).replace(connectors, "");
       const context = prose.slice(Math.max(0, match.index - 60), match.index + 20);
-      assert.ok(negation.test(before), `${where}: not a prohibition: \u2026${context}\u2026`);
+      assert.ok(negation.test(before), `${where}: not a prohibition: …${context}…`);
     }
   }
 });
