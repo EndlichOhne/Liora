@@ -320,6 +320,6 @@ export const xaiProvider: AIProvider = {
 export function getAIProvider(id = "xai"): AIProvider {
   if (id === "xai") return xaiProvider;
   throw new Error(
-    `Anbieter \u201e${id}\u201c ist nicht konfiguriert. Aktiv ist xAI \u00fcber die serverseitige Variable XAI_API_KEY. Weitere Anbieter k\u00f6nnen als AIProvider erg\u00e4nzt werden.`,
+    `Anbieter „${id}“ ist nicht konfiguriert. Aktiv ist xAI über die serverseitige Variable XAI_API_KEY. Weitere Anbieter können als AIProvider ergänzt werden.`,
   );
 }
