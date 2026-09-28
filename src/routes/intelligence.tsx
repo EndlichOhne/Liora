@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { AppFrame, PageBody, PageHead } from "@/components/app-frame";
 import { Button, Empty, Field, Panel, TextArea, inputClass } from "@/components/ui";
-import { askIntelligence, loadIntelligence, versionFinding } from "@/lib/intelligence/core-functions";
+import { askIntelligence, loadIntelligence, saveLinks, versionFinding } from "@/lib/intelligence/core-functions";
 import { NOT_A_TRUTH } from "@/lib/intelligence/core";
+import { GRAPH_EDGE_NOTE } from "@/lib/intelligence/hardening";
 
 export const Route = createFileRoute("/intelligence")({ component: IntelligenceRoute });
 
@@ -91,6 +92,27 @@ function IntelligencePage() {
 
         <section className="mt-6 grid gap-4 lg:grid-cols-2">
           <Panel>
+            <h2 className="font-display text-2xl tracking-tight">Speicher</h2>
+            {desk?.storage ? (
+              <ul className="mt-3 space-y-1 text-sm">
+                <li>DATABASE MODE: {desk.storage.mode === "neon" ? "Neon" : "Lokale Datenbank"}</li>
+                <li>STORAGE LOCATION: {desk.storage.locationLabel}</li>
+                <li>PERSISTENCE STATUS: {desk.storage.persistence}</li>
+                <li>BACKUP STATUS: {desk.storage.backup}</li>
+                <li className="text-muted">{desk.storage.backupNote}</li>
+              </ul>
+            ) : <p className="mt-3 text-sm text-muted">Speicherstatus noch nicht gelesen.</p>}
+          </Panel>
+          <Panel>
+            <h2 className="font-display text-2xl tracking-tight">Datenbestand</h2>
+            <p className="mt-3 text-sm">{desk?.dataset.phrase ?? "NICHT VERFÜGBAR"}</p>
+            {run?.datasetPhrase ? <p className="mt-2 text-sm">Diese Frage: {run.datasetPhrase}</p> : null}
+            {run && run.semanticOnly > 0 ? <p className="mt-2 text-sm text-muted">Semantische Treffer: {run.semanticOnly}. Sie werden nicht als Fakt gespeichert.</p> : null}
+          </Panel>
+        </section>
+
+        <section className="mt-6 grid gap-4 lg:grid-cols-2">
+          <Panel>
             <h2 className="font-display text-2xl tracking-tight">Aktueller Kontext</h2>
             {context ? (
               <ul className="mt-3 space-y-1 text-sm">
@@ -99,6 +121,8 @@ function IntelligencePage() {
                 <li>Thema: {context.activeTopic || "keins"}</li>
                 <li>Gebiet: {context.activeGeography || "keins"}</li>
                 <li>Zeit: {context.activeTimeRange || "DATE MISSING"}</li>
+                <li>Gespräch: {context.recentTurns.length ? `${context.recentTurns.length} gespeicherte Beiträge` : "noch keine Beiträge"}</li>
+                <li>Anweisung: {context.activeInstruction || "keine"}</li>
               </ul>
             ) : <p className="mt-3 text-sm text-muted">Noch kein Kontext.</p>}
           </Panel>
@@ -144,8 +168,39 @@ function IntelligencePage() {
         ) : null}
 
         <section className="mt-6">
+          <h2 className="font-display text-2xl tracking-tight">Fallvergleich</h2>
+          <p className="mt-1 text-sm text-muted">{GRAPH_EDGE_NOTE} Ein Widerspruch bleibt sichtbar. Mögliche Treffer werden nicht gespeichert.</p>
+          {desk && desk.links.length === 0 ? <div className="mt-3"><Empty title="Keine Verknüpfung aus Merkmalen" body="Nur gleiche gespeicherte Merkmale erzeugen einen Vergleich." /></div> : null}
+          <ul className="mt-3 grid gap-2">
+            {(desk?.links ?? []).map((link) => (
+              <li key={`${link.leftCaseId}-${link.rightCaseId}-${link.linkKind}`} className="rounded-lg border border-border bg-card px-4 py-3 text-sm">
+                <p>{link.linkKind} · {link.linkStrength}</p>
+                <p>{link.leftCaseId} · {link.rightCaseId}</p>
+                <p className="text-muted">{link.note}</p>
+                <p className="text-xs text-muted">Quellen {link.sourceCount} · unabhängig {link.independentSourceCount === 0 ? "NICHT VERFÜGBAR" : link.independentSourceCount}</p>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-3">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                setError("");
+                void saveLinks()
+                  .then((res) => {
+                    setNote(res.note);
+                    return load();
+                  })
+                  .catch((err: unknown) => setError(err instanceof Error ? err.message : "Die Verknüpfung wurde nicht gespeichert."));
+              }}
+            >Dokumentierte Verknüpfungen speichern</Button>
+          </div>
+        </section>
+
+        <section className="mt-6">
           <h2 className="font-display text-2xl tracking-tight">Verknüpfungen</h2>
-          <p className="mt-1 text-sm text-muted">Nur gespeicherte Kanten. Eine Kante ist keine Schuld.</p>
+          <p className="mt-1 text-sm text-muted">{GRAPH_EDGE_NOTE}</p>
           {desk && desk.graph.length === 0 ? <div className="mt-3"><Empty title="Keine Verknüpfung" body="Personen, Fälle und Quellen erscheinen hier erst, wenn sie gespeichert sind." /></div> : null}
           <ul className="mt-3 grid gap-2">
             {(desk?.graph ?? []).map((edge, index) => (
@@ -163,7 +218,7 @@ function IntelligencePage() {
           <ul className="mt-3 grid gap-2">
             {(desk?.versions ?? []).map((item) => (
               <li key={`${item.findingId}-${item.version}`} className="rounded-lg border border-border bg-card px-4 py-3 text-sm">
-                <p>{item.status === "current" ? "CURRENT" : "OLDER VERSION"} · v{item.version}</p>
+                <p>{item.change ? `${item.change} · ` : ""}{item.status === "current" ? "CURRENT" : "OLDER VERSION"} · v{item.version}</p>
                 {item.previousValue ? <p className="text-muted">Vorher: {item.previousValue}</p> : null}
                 <p>Neu: {item.newValue}</p>
                 <p className="text-xs text-muted">{item.reason} · {item.source || "SOURCE MISSING"}</p>

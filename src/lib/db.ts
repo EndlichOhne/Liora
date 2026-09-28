@@ -1,4 +1,5 @@
 import { pendingMigrations } from "../../scripts/migration-plan.mjs";
+import { assertDirectory, persistencePlan } from "./persistence";
 
 /** Which database backend is active. */
 export type DbSource = "neon" | "pglite";
@@ -106,12 +107,17 @@ function createNeonSql(): Promise<Sql> {
 }
 
 async function createPgliteSql(): Promise<Sql> {
-  // Embedded Postgres, imported on demand so it never loads on the Neon path.
-  // One in-memory instance per process, shared across HMR module instances, so
-  // data survives source edits (it resets on dev-server restart).
+  // File-backed PGLite so a process restart keeps the local database.
+  // Neon is used instead whenever DATABASE_URL is set. Init errors propagate.
   globalRef.__pgliteInstance__ ??= (async () => {
+    const plan = persistencePlan({
+      databaseUrl: undefined,
+      cwd: process.cwd(),
+      override: process.env.LIORA_DATA_DIR,
+    });
+    assertDirectory(plan.directory);
     const { PGlite } = await import("@electric-sql/pglite");
-    const pg = new PGlite({
+    const pg = new PGlite(plan.directory, {
       parsers: {
         [OID_INT8]: Number,
         [OID_DATE]: identity,
@@ -129,7 +135,7 @@ async function createPgliteSql(): Promise<Sql> {
   });
   const pg = await globalRef.__pgliteInstance__;
 
-  // Apply migrations/ (the single schema source, including research tasks, case candidates, person files, person links, the audit log and the intelligence context) so preview matches production.
+  // Apply migrations/ (the single schema source, including research tasks, case candidates, person files, person links, the audit log, the intelligence context and structured case features) so preview matches production.
   // SQL is inlined by the bundler via import.meta.glob (no runtime fs); applied
   // files are tracked in _migrations. The glob does not descend, so the opt-in
   // auth schema under migrations/auth/ stays out. Runs once per module instance
@@ -212,8 +218,8 @@ export async function getPglite(): Promise<import("@electric-sql/pglite").PGlite
 /**
  * Finish DB bootstrap before the server handles traffic.
  *
- * - **PGLite** (preview / no `DATABASE_URL`): open the in-memory DB and apply
- *   `migrations/*.sql`. Idempotent — concurrent callers share one promise.
+ * - **PGLite** (no `DATABASE_URL`): open the file-backed DB and apply
+ *   `migrations/*.sql`. A restart keeps that directory. Idempotent.
  * - **Neon**: no-op (pool is created lazily on first query).
  *
  * Vite `configureServer` awaits this at dev startup; production imports of this

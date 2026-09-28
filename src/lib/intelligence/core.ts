@@ -56,6 +56,9 @@ export type ContextState = {
   activeHypotheses: string[];
   openQuestions: string[];
   activeTopic: string;
+  recentTurns: { role: string; text: string }[];
+  lastDecisions: string[];
+  activeInstruction: string;
 };
 
 export function emptyContext(): ContextState {
@@ -72,6 +75,9 @@ export function emptyContext(): ContextState {
     activeHypotheses: [],
     openQuestions: [],
     activeTopic: "",
+    recentTurns: [],
+    lastDecisions: [],
+    activeInstruction: "",
   };
 }
 
@@ -95,7 +101,8 @@ function clip(value: string, max: number) {
 
 export function applyUtterance(state: ContextState, text: string): { state: ContextState; intent: Intent } {
   const intent = detectIntent(text);
-  const follow = isFollowUp(text) || intent === "GENERAL" && /\b(such(?:e)? noch|jetzt ganz|noch nach)\b/i.test(text);
+  const pronoun = /\b(den|dem|diesen)\s+fall\b|\bdem fahrzeug\b|\bdazu\b/i.test(text);
+  const follow = isFollowUp(text) || pronoun || (intent === "GENERAL" && /\b(such(?:e)? noch|jetzt ganz|noch nach)\b/i.test(text));
   const next: ContextState = {
     ...state,
     activeSources: state.activeSources.slice(0, 20),
@@ -103,7 +110,10 @@ export function applyUtterance(state: ContextState, text: string): { state: Cont
     activeFilters: state.activeFilters.slice(0, 12),
     activeHypotheses: state.activeHypotheses.slice(0, 8),
     openQuestions: state.openQuestions.slice(0, 12),
+    recentTurns: state.recentTurns.slice(-39),
+    lastDecisions: state.lastDecisions.slice(0, 8),
   };
+  next.recentTurns = [...next.recentTurns, { role: "user", text: clip(text, 280) }].slice(-40);
   if (!follow) {
     const scope = detectScope(text);
     if (scope !== "custom") next.activeGeography = scope;
@@ -119,6 +129,11 @@ export function applyUtterance(state: ContextState, text: string): { state: Cont
   if (/\bhypothese\b/i.test(text)) {
     const line = clip(text, 180);
     if (line && !next.activeHypotheses.includes(line)) next.activeHypotheses = [line, ...next.activeHypotheses].slice(0, 8);
+  }
+  if (/ab jetzt immer|anweisung|immer auf deutsch/i.test(text)) next.activeInstruction = clip(text, 200);
+  if (/entschieden|beschluss/i.test(text)) {
+    const line = clip(text, 180);
+    if (line && !next.lastDecisions.includes(line)) next.lastDecisions = [line, ...next.lastDecisions].slice(0, 8);
   }
   const entities = scanRequest(text)
     .filter((item) => item.kind !== "scope")

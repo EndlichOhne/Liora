@@ -771,7 +771,7 @@ export async function loadPromptContext(userId: string): Promise<{ rules: string
 }
 
 export async function onUserMessage(userId: string, text: string, priorAnswer: string): Promise<string | null> {
-  await rememberContext(userId, text).catch(() => undefined);
+  await rememberContext(userId, text, priorAnswer);
   const hit = parseFeedback(text);
   if (!hit) {
     const decision = routeTask(text);

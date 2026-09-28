@@ -1,4 +1,5 @@
-import { getSql } from "@/lib/db";
+import { getPglite, getSql } from "@/lib/db";
+import { dbSource } from "@/lib/db";
 import { saveMemory } from "@/lib/data.server";
 import { findSecret } from "@/lib/intelligence/engine";
 import {
@@ -9,8 +10,12 @@ import {
   type ContextState,
   type MemoryClass,
 } from "@/lib/intelligence/core";
+import { countPresence, datasetPhrase, linksFromFeatures, versionChange, assignProvenance, independentOrigins } from "@/lib/intelligence/hardening";
+import { persistencePlan } from "@/lib/persistence";
 import type { MemoryCategory } from "@/lib/domain";
 import { writeAudit } from "@/lib/security/log";
+import fs from "node:fs";
+import path from "node:path";
 
 function text(value: unknown): string {
   return value == null ? "" : String(value);
@@ -36,6 +41,11 @@ export function parseContext(value: unknown): ContextState {
     activeHypotheses: list(row.activeHypotheses, 8),
     openQuestions: list(row.openQuestions, 12),
     activeTopic: text(row.activeTopic).slice(0, 40),
+    recentTurns: Array.isArray(row.recentTurns)
+      ? row.recentTurns.slice(-40).map((item) => ({ role: text(item.role) === "assistant" ? "assistant" : "user", text: text(item.text).slice(0, 280) })).filter((item) => item.text)
+      : [],
+    lastDecisions: list(row.lastDecisions, 8),
+    activeInstruction: text(row.activeInstruction).slice(0, 200),
   };
 }
 
@@ -68,11 +78,39 @@ export async function saveContext(userId: string, state: ContextState) {
   `;
 }
 
-export async function rememberContext(userId: string, utterance: string) {
+export async function rememberContext(userId: string, utterance: string, priorAnswer = "") {
   if (!userId || !utterance.trim() || findSecret(utterance)) return;
-  const current = await loadContext(userId);
-  const next = applyUtterance(current, utterance);
+  let current = await loadContext(userId);
+  if (current.recentTurns.length === 0) current = await backfillTurns(userId, current, utterance);
+  const withAnswer = priorAnswer.trim() && !findSecret(priorAnswer)
+    ? {
+        ...current,
+        recentTurns: [...current.recentTurns, { role: "assistant", text: priorAnswer.replace(/\s+/g, " ").trim().slice(0, 280) }].slice(-40),
+      }
+    : current;
+  const next = applyUtterance(withAnswer, utterance);
   await saveContext(userId, next.state);
+}
+
+async function backfillTurns(userId: string, current: ContextState, utterance: string): Promise<ContextState> {
+  const db = await getSql();
+  const rows = await db<{ role: string; content: string }>`
+    select role, content from messages where user_id = ${userId} order by created_at desc limit 40
+  `;
+  const turns = rows.slice().reverse();
+  let state = current;
+  turns.forEach((row, index) => {
+    const body = text(row.content).replace(/\s+/g, " ").trim();
+    if (!body || findSecret(body)) return;
+    const last = index === turns.length - 1 && row.role === "user" && body === utterance.trim();
+    if (last) return;
+    if (row.role === "assistant") {
+      state = { ...state, recentTurns: [...state.recentTurns, { role: "assistant", text: body.slice(0, 280) }].slice(-40) };
+      return;
+    }
+    state = applyUtterance(state, body).state;
+  });
+  return state;
 }
 
 export async function resolveOwnedCase(userId: string, token: string): Promise<string | null> {
@@ -115,12 +153,9 @@ export async function runCore(userId: string, utterance: string) {
       select case_id, feature_value from ci_case_features where user_id = ${userId} order by created_at desc limit 80
     `,
   ]);
-  const analyzed = new Set(features.map((row) => row.case_id).filter(Boolean));
-  const token = text.toLowerCase();
-  const present = new Set(
-    features
-      .filter((row) => row.feature_value && token.includes(String(row.feature_value).toLowerCase().slice(0, 80)))
-      .map((row) => row.case_id),
+  const presence = countPresence(
+    text,
+    features.map((row) => ({ caseId: row.case_id, value: row.feature_value })),
   );
   const result = orchestrate({
     actorId: userId,
@@ -130,7 +165,7 @@ export async function runCore(userId: string, utterance: string) {
     memories,
     knowledge,
     sources,
-    featurePresence: { analyzed: analyzed.size, present: present.size },
+    featurePresence: { analyzed: presence.analyzed, present: presence.present },
     webEnabled: false,
   });
   if (!result.denied) await saveContext(userId, result.context);
@@ -146,6 +181,8 @@ export async function runCore(userId: string, utterance: string) {
     });
   }
   if (result.denied) await writeAudit(userId, "PERMISSION_DENIED", "intelligence", "denied");
+  const counted = await db<{ n: number }>`select count(distinct case_id) as n from ci_case_features where user_id = ${userId}`;
+  const size = Number(counted[0]?.n ?? 0);
   const taskId = crypto.randomUUID();
   const summary = result.denied ? result.reason : `${result.intent}. ${result.conclusion}`.slice(0, 400);
   await db`
@@ -164,7 +201,14 @@ export async function runCore(userId: string, utterance: string) {
       now()
     )
   `;
-  return { taskId, memoryId, ...result };
+  return {
+    taskId,
+    memoryId,
+    datasetPhrase: datasetPhrase(presence.present, size > 0 ? { size, name: "Fälle mit gespeichertem Merkmal" } : null),
+    semanticOnly: presence.semanticOnly,
+    possibleOnly: presence.possibleOnly,
+    ...result,
+  };
 }
 
 export async function listCoreGraph(userId: string) {
@@ -197,7 +241,8 @@ export async function appendFindingVersion(userId: string, input: { findingId: s
   `;
   const decision = nextFindingVersion(prior[0] ? { version: Number(prior[0].version), value: prior[0].new_value } : null, input);
   if (decision.action === "reject") return { ok: false as const, note: decision.reason };
-  if (decision.action === "keep") return { ok: true as const, note: "Merkmale unverändert. Keine neue Bewertung.", version: decision.version };
+  if (decision.action === "keep") return { ok: true as const, note: "Merkmale unverändert. Keine neue Bewertung.", version: decision.version, change: "CONFIRMED" as const };
+  const change = versionChange(decision.previousValue, decision.newValue);
   if (prior[0]) {
     await db`
       update ci_finding_versions set status = 'older'
@@ -205,13 +250,13 @@ export async function appendFindingVersion(userId: string, input: { findingId: s
     `;
   }
   await db`
-    insert into ci_finding_versions (id, user_id, finding_id, version, previous_value, new_value, reason, source_note, status)
+    insert into ci_finding_versions (id, user_id, finding_id, version, previous_value, new_value, reason, source_note, status, change_kind)
     values (
       ${crypto.randomUUID()}, ${userId}, ${input.findingId}, ${decision.version}, ${decision.previousValue},
-      ${decision.newValue}, ${decision.reason}, ${decision.source || "SOURCE MISSING"}, 'current'
+      ${decision.newValue}, ${decision.reason}, ${decision.source || "SOURCE MISSING"}, 'current', ${change}
     )
   `;
-  return { ok: true as const, note: "Neue Version gespeichert. Die vorherige bleibt erhalten.", version: decision.version };
+  return { ok: true as const, note: "Neue Version gespeichert. Die vorherige bleibt erhalten.", version: decision.version, change };
 }
 
 export async function loadCoreDesk(userId: string) {
@@ -223,13 +268,27 @@ export async function loadCoreDesk(userId: string) {
       where user_id = ${userId} and agent = 'orchestrator'
       order by started_at desc limit 6
     `,
-    db<{ finding_id: string; version: number; previous_value: string; new_value: string; reason: string; source_note: string; status: string; created_at: unknown }>`
-      select finding_id, version, previous_value, new_value, reason, source_note, status, created_at
+    db<{ finding_id: string; version: number; previous_value: string; new_value: string; reason: string; source_note: string; status: string; change_kind: string; created_at: unknown }>`
+      select finding_id, version, previous_value, new_value, reason, source_note, status, change_kind, created_at
       from ci_finding_versions where user_id = ${userId}
       order by created_at desc limit 8
     `,
     listCoreGraph(userId),
   ]);
+  const storage = await storageReport();
+  await persistProvenance(userId);
+  const counted = await db<{ n: number }>`select count(distinct case_id) as n from ci_case_features where user_id = ${userId}`;
+  const size = Number(counted[0]?.n ?? 0);
+  const featureRows = await db<{ case_id: string; feature_key: string; feature_value: string; source_url: string }>`
+    select case_id, feature_key, feature_value, source_url from ci_case_features
+    where user_id = ${userId} order by created_at desc limit 80
+  `;
+  const links = linksFromFeatures(featureRows.map((row) => ({
+    caseId: row.case_id,
+    feature: row.feature_key,
+    normalizedValue: row.feature_value,
+    sourceId: row.source_url,
+  })));
   return {
     context,
     runs: runs.map((row) => ({
@@ -247,8 +306,105 @@ export async function loadCoreDesk(userId: string) {
       reason: row.reason,
       source: row.source_note,
       status: row.status,
+      change: row.change_kind || "CHANGED",
     })),
     graph,
-    notConfigured: ["Vektorsuche ist nicht eingerichtet.", "Diese Ansicht startet keine Websuche.", "Produktionscode wird nicht selbst geändert."],
+    dataset: {
+      size,
+      phrase: size > 0 ? `${size} Fälle mit mindestens einem gespeicherten Merkmal. Keine Aussage über alle Fälle.` : "NICHT VERFÜGBAR",
+    },
+    links,
+    storage,
+    notConfigured: [
+      "Einbettungs-Vektorsuche ist nicht eingerichtet. Semantik ist hier nur eine feste Slot-Regel, kein Modell.",
+      "Diese Ansicht startet keine Websuche.",
+      "Produktionscode wird nicht selbst geändert.",
+      storage.backup === "NOT_CONFIGURED" ? storage.backupNote : "",
+    ].filter(Boolean),
+  };
+}
+
+async function persistProvenance(userId: string) {
+  const db = await getSql();
+  const rows = await db<{ id: string; url: string; title: string; note: string; kind: string }>`
+    select id, url, title, note, kind from ci_sources where user_id = ${userId} order by created_at desc limit 40
+  `;
+  const marked = assignProvenance(rows);
+  for (const row of marked) {
+    await db`
+      update ci_sources
+      set canonical_source_id = ${row.canonicalSourceId},
+          source_parent_id = ${row.sourceParentId},
+          source_origin = ${row.sourceOrigin},
+          source_relationship = ${row.sourceRelationship},
+          duplicate_group = ${row.duplicateGroup},
+          independence_status = ${row.independenceStatus}
+      where id = ${row.id} and user_id = ${userId}
+    `;
+  }
+  return independentOrigins(marked);
+}
+
+export async function saveDocumentedLinks(userId: string) {
+  const db = await getSql();
+  const featureRows = await db<{ case_id: string; feature_key: string; feature_value: string; source_url: string }>`
+    select case_id, feature_key, feature_value, source_url from ci_case_features
+    where user_id = ${userId} order by created_at desc limit 80
+  `;
+  const owned = await db<{ id: string }>`select id from ci_cases where user_id = ${userId}`;
+  const own = new Set(owned.map((row) => row.id));
+  const links = linksFromFeatures(featureRows.map((row) => ({
+    caseId: row.case_id,
+    feature: row.feature_key,
+    normalizedValue: row.feature_value,
+    sourceId: row.source_url,
+  }))).filter((link) => link.storable && own.has(link.leftCaseId) && own.has(link.rightCaseId) && !forbiddenLink(link.note));
+  if (!links.length) return { saved: 0, note: "Keine dokumentierte Verknüpfung ohne Widerspruch." };
+  let saved = 0;
+  for (const link of links) {
+    const existing = await db<{ id: string }>`
+      select id from ci_case_links
+      where user_id = ${userId} and left_case_id = ${link.leftCaseId} and right_case_id = ${link.rightCaseId} and link_kind = ${link.linkKind}
+      limit 1
+    `;
+    if (existing[0]) continue;
+    await db`
+      insert into ci_case_links (
+        id, user_id, left_case_id, right_case_id, link_kind, link_strength,
+        supporting_features, contradicting_features, source_count, independent_source_count, note
+      ) values (
+        ${crypto.randomUUID()}, ${userId}, ${link.leftCaseId}, ${link.rightCaseId}, ${link.linkKind}, ${link.linkStrength},
+        ${link.supporting.join(", ")}, ${link.contradicting.join(", ")}, ${link.sourceCount}, ${link.independentSourceCount}, ${link.note.slice(0, 500)}
+      )
+    `;
+    saved += 1;
+  }
+  return { saved, note: saved ? `${saved} dokumentierte Verknüpfungen gespeichert.` : "Schon gespeichert. Keine neue Verknüpfung." };
+}
+
+function forbiddenLink(note: string) {
+  return /wahrscheinliche[rsnm]?\s+t[aä]ter|gleicher\s+t[aä]ter/i.test(note);
+}
+
+async function storageReport() {
+  const override = process.env.LIORA_DATA_DIR;
+  if (dbSource === "neon") {
+    return persistencePlan({ databaseUrl: "set", cwd: process.cwd(), directoryExists: true });
+  }
+  const pg = await getPglite();
+  const liveDir = pg.dataDir ?? "";
+  const backupDir = path.join(process.cwd(), ".data", "backups");
+  const plan = persistencePlan({
+    cwd: process.cwd(),
+    override,
+    directoryExists: Boolean(liveDir) && fs.existsSync(liveDir),
+    backupExists: fs.existsSync(backupDir),
+  });
+  return {
+    mode: plan.mode,
+    locationLabel: plan.locationLabel,
+    persistence: plan.persistence,
+    backup: plan.backup,
+    backupNote: liveDir ? plan.backupNote : "Der laufende Prozess hat noch keine Datei-Datenbank geöffnet. Dauerhaft erst nach dem nächsten Prozessstart. Ein Produktions-Backup ist nicht eingerichtet.",
   };
 }

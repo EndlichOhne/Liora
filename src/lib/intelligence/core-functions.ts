@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware } from "@/lib/auth/middleware";
-import { appendFindingVersion, loadCoreDesk, runCore } from "@/lib/intelligence/core-store";
+import { appendFindingVersion, loadCoreDesk, runCore, saveDocumentedLinks } from "@/lib/intelligence/core-store";
 
 function str(value: unknown, max: number) {
   return typeof value === "string" ? value.slice(0, max) : "";
@@ -30,3 +30,7 @@ export const versionFinding = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ context, data }) => appendFindingVersion(context.userId, data));
+
+export const saveLinks = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => saveDocumentedLinks(context.userId));
