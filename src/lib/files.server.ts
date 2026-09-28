@@ -17,6 +17,7 @@ const ALLOWED = new Set([
 ]);
 
 export function normalizeMime(mime: string, name: string): string {
+  if (/\.(exe|js|mjs|html|svg|sh|bat|cmd|ps1)$/i.test(name)) throw new Error("Dieser Dateityp wird nicht unterstützt.");
   const lower = mime.toLowerCase().split(";")[0]?.trim() || "";
   if (ALLOWED.has(lower)) return lower;
   const ext = name.toLowerCase().split(".").pop() ?? "";
@@ -38,6 +39,15 @@ export function normalizeMime(mime: string, name: string): string {
   const guessed = byExt[ext];
   if (!guessed) throw new Error("Dieser Dateityp wird nicht unterstützt.");
   return guessed;
+}
+
+export function contentMatches(mime: string, buf: Buffer): boolean {
+  if (mime === "application/pdf") return buf.subarray(0, 5).toString("utf8") === "%PDF-";
+  if (mime === "image/png") return buf.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  if (mime === "image/jpeg") return buf.length > 2 && buf[0] === 0xff && buf[1] === 0xd8;
+  if (mime === "image/gif") return buf.subarray(0, 3).toString("utf8") === "GIF";
+  if (mime === "image/webp") return buf.subarray(0, 4).toString("utf8") === "RIFF" && buf.subarray(8, 12).toString("utf8") === "WEBP";
+  return true;
 }
 
 export function safeName(name: string): string {

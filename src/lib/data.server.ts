@@ -17,7 +17,9 @@ import type {
   ThemeChoice,
 } from "@/lib/domain";
 import { isMemoryCategory, isMemoryConfidence, isMode } from "@/lib/domain";
-import { extractUpload, normalizeMime, safeName } from "@/lib/files.server";
+import { contentMatches, extractUpload, normalizeMime, safeName } from "@/lib/files.server";
+import { writeAudit } from "@/lib/security/log";
+import { stepUpFresh } from "@/lib/security/step-up";
 
 function iso(value: unknown): string {
   if (value instanceof Date) return value.toISOString();
@@ -233,6 +235,7 @@ export async function resetWithRecovery(email: string, code: string, newPassword
   if (!updated.length) {
     throw new Error("Für dieses Konto gibt es kein Passwort. Melde dich mit Google oder X an.");
   }
+  await sql`delete from recovery_codes where user_id = ${user.id}`;
 }
 
 export async function assertRate(userId: string, kind: string, limit: number, window: "10 minutes" | "1 hour" | "1 day") {
@@ -888,6 +891,7 @@ export async function uploadFile(
   if (!input.base64 || input.base64.length > 8_200_000) throw new Error("Die Datei ist zu groß.");
   const buf = Buffer.from(input.base64, "base64");
   if (!buf.byteLength) throw new Error("Die Datei ist leer.");
+  if (!contentMatches(mime, buf)) throw new Error("Der Inhalt passt nicht zum Dateityp.");
   const extracted = await extractUpload(name, mime, buf);
   const sql = await db();
   const id = crypto.randomUUID();
@@ -899,6 +903,7 @@ export async function uploadFile(
     )
   `;
   await recordUsage(userId, "upload");
+  await writeAudit(userId, "FILE_UPLOAD", "file", "allow");
   const listed = await listFiles(userId, input.projectId ?? null);
   return listed.find((f) => f.id === id) ?? {
     id,
@@ -917,6 +922,7 @@ export async function deleteFile(userId: string, id: string) {
   assertId(id);
   const sql = await db();
   await sql`delete from files where id = ${id} and user_id = ${userId}`;
+  await writeAudit(userId, "FILE_DELETE", "file", "allow");
 }
 
 export async function loadFilesForPrompt(userId: string, ids: string[]) {
@@ -940,7 +946,26 @@ export async function loadFilesForPrompt(userId: string, ids: string[]) {
   return rows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
 }
 
+export async function confirmStepUp(userId: string) {
+  const sql = await db();
+  await sql`
+    insert into ci_reauth (user_id, confirmed_at) values (${userId}, now())
+    on conflict (user_id) do update set confirmed_at = now()
+  `;
+  await writeAudit(userId, "ACCOUNT_CHANGE", "step-up", "allow");
+}
+
+export async function assertStepUp(userId: string) {
+  const sql = await db();
+  const rows = await sql<{ confirmed_at: Date | string | null }>`select confirmed_at from ci_reauth where user_id = ${userId} limit 1`;
+  if (!stepUpFresh(rows[0]?.confirmed_at ?? null)) {
+    throw new Error("Bitte die Aktion in den Einstellungen erneut bestätigen.");
+  }
+}
+
 export async function exportData(userId: string) {
+  await assertStepUp(userId);
+  await writeAudit(userId, "EXPORT", "account", "allow");
   const profile = await ensureProfile(userId);
   const [conversations, memories, projects, files] = await Promise.all([
     listConversations(userId, {}),
@@ -979,6 +1004,8 @@ export async function exportData(userId: string) {
 }
 
 export async function deleteAccount(userId: string) {
+  await assertStepUp(userId);
+  await writeAudit(userId, "ACCOUNT_CHANGE", "account", "allow");
   const sql = await db();
   await sql`delete from "user" where "id" = ${userId}`;
 }

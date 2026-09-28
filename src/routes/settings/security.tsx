@@ -60,7 +60,7 @@ function SecurityPage() {
             </section>
             <section className="mt-6">
               <h2 className="font-display text-2xl tracking-tight">Export</h2>
-              <p className="mt-1 text-sm text-muted">Ein Export enthält nur Daten dieses Kontos. Eine erneute Anmeldung davor ist nicht eingerichtet.</p>
+              <p className="mt-1 text-sm text-muted">Ein Export enthält nur Daten dieses Kontos und verlangt vorher die Bestätigung in den Einstellungen. Das ist keine Passwort-Neueingabe.</p>
             </section>
           </>
         ) : null}

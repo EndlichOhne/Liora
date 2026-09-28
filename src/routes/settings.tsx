@@ -5,7 +5,7 @@ import { UserButton } from "@/lib/auth/gates";
 import { AppFrame, PageHead, useApp } from "@/components/app-frame";
 import { Button, Field, inputClass, TextArea } from "@/components/ui";
 import { KNOWN_MODELS, VOICES, applyTheme, type ResponseStyle, type ThemeChoice } from "@/lib/domain";
-import { downloadExport, removeAccount, replaceRecoveryCode, saveProfile } from "@/lib/data.functions";
+import { confirmStep, downloadExport, removeAccount, replaceRecoveryCode, saveProfile } from "@/lib/data.functions";
 import { loadModels } from "@/lib/intelligence/functions";
 
 export const Route = createFileRoute("/settings")({ component: SettingsRoute });
@@ -248,19 +248,31 @@ function SettingsPage() {
 
         <section className="space-y-3 rounded-lg border border-border bg-card p-4">
           <h2 className="font-medium">Daten</h2>
-          <p className="text-sm text-muted">Export enthält Profil, Chats, Erinnerungen, Projekte und Dateinamen. Bilddaten bleiben in der App.</p>
+          <p className="text-sm text-muted">Export enthält Profil, Chats, Erinnerungen, Projekte und Dateinamen. Bilddaten bleiben in der App. Export und Löschen gelten 10 Minuten nach der Bestätigung. Das ist keine erneute Passworteingabe.</p>
           <Button
             variant="ghost"
             onClick={() => {
-              void downloadExport().then((data) => {
-                const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = "liora-export.json";
-                a.click();
-                URL.revokeObjectURL(url);
-              });
+              void confirmStep()
+                .then(() => setError(""))
+                .catch((err: unknown) => setError(err instanceof Error ? err.message : "Die Bestätigung ist fehlgeschlagen."));
+            }}
+          >
+            Export und Löschen bestätigen
+          </Button>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              void downloadExport()
+                .then((data) => {
+                  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = "liora-export.json";
+                  a.click();
+                  URL.revokeObjectURL(url);
+                })
+                .catch((err: unknown) => setError(err instanceof Error ? err.message : "Der Export ist fehlgeschlagen."));
             }}
           >
             Daten exportieren

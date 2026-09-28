@@ -6,6 +6,10 @@ const ACTIONS = new Set([
   "PERMISSION_DENIED",
   "SECURITY_EVENT",
   "RESEARCH_STARTED",
+  "FILE_UPLOAD",
+  "FILE_DELETE",
+  "EXPORT",
+  "ACCOUNT_CHANGE",
 ]);
 
 export async function writeAudit(userId: string, action: string, resource: string, result: string) {

@@ -1,5 +1,6 @@
 import { pendingMigrations } from "../../scripts/migration-plan.mjs";
 import { assertDirectory, persistencePlan } from "./persistence";
+import { assertDeployedConfig } from "./security/production";
 
 /** Which database backend is active. */
 export type DbSource = "neon" | "pglite";
@@ -135,7 +136,7 @@ async function createPgliteSql(): Promise<Sql> {
   });
   const pg = await globalRef.__pgliteInstance__;
 
-  // Apply migrations/ (the single schema source, including research tasks, case candidates, person files, person links, the audit log, the intelligence context and structured case features) so preview matches production.
+  // Apply migrations/ (the single schema source, including research tasks, case candidates, person files, person links, the audit log, the intelligence context, structured case features and the step-up confirmation) so preview matches production.
   // SQL is inlined by the bundler via import.meta.glob (no runtime fs); applied
   // files are tracked in _migrations. The glob does not descend, so the opt-in
   // auth schema under migrations/auth/ stays out. Runs once per module instance
@@ -182,6 +183,7 @@ async function createSql(): Promise<Sql> {
         "or a server route loader, never from client code.",
     );
   }
+  assertDeployedConfig(process.env);
   return dbSource === "neon" ? createNeonSql() : createPgliteSql();
 }
 

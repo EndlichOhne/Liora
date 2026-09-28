@@ -15,11 +15,12 @@ export const loadSecurity = createServerFn({ method: "GET" })
       filesScopedByUser: true,
       parameterizedSql: true,
       rateLimitOnCostlyRoutes: true,
-      loginRateLimit: false,
+      loginRateLimit: true,
       auditWrites: true,
       ssrfBlocksPrivate: true,
       exposedClientSecretNames: exposedClientSecretNames(Object.keys(process.env)),
       providerKeyOnServer: Boolean(process.env.XAI_API_KEY?.trim()),
+      stepUp: true,
     });
     await writeAudit(context.userId, "SECURITY_EVENT", "settings", "allow");
     const events = await listAudit(context.userId);

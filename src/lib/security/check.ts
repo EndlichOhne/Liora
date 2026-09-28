@@ -19,6 +19,7 @@ export type SecurityFacts = {
   ssrfBlocksPrivate: boolean;
   exposedClientSecretNames: string[];
   providerKeyOnServer: boolean;
+  stepUp?: boolean;
 };
 
 const FORBIDDEN = /100\s*%\s*sicher|unhackable|100%\s*secure/i;
@@ -54,12 +55,12 @@ export function buildSecurityReport(facts: SecurityFacts): {
     {
       id: "SESSION_SECURITY",
       status: facts.sessionCookieHardened && facts.httpOnlyDefault ? "PASS" : "WARNING",
-      note: "Cookie: Secure, SameSite=Lax, Path=/, __Host-Name. HttpOnly kommt aus dem Better-Auth-Standard und wird hier nicht ausgeschaltet. Ablauf der Sitzung ist der Better-Auth-Standard von 7 Tagen. Eine zusätzliche Rotation ist nicht eingebaut.",
+      note: "Cookie: Secure, SameSite=Lax, Path=/, __Host-Name. HttpOnly kommt aus dem Better-Auth-Standard und wird hier nicht ausgeschaltet. Die Sitzung läuft nach 12 Stunden ab. Der Cookie-Cache gilt 5 Minuten.",
     },
     {
       id: "SESSION_ROTATION",
       status: "NOT_CONFIGURED",
-      note: "Eine erneute Anmeldung für Export oder Löschen ist nicht eingebaut.",
+      note: "Die Sitzungs-ID wird nicht bei jeder Anfrage rotiert. Export und Löschen verlangen eine eigene Bestätigung, das ist kein zweites Passwort.",
     },
     {
       id: "SECRET_CONFIGURATION",
@@ -89,13 +90,13 @@ export function buildSecurityReport(facts: SecurityFacts): {
       id: "LOGIN_RATE_LIMIT",
       status: facts.loginRateLimit ? "PASS" : "NOT_CONFIGURED",
       note: facts.loginRateLimit
-        ? "Anmeldung und Registrierung haben ein Limit."
+        ? "Anmeldung, Registrierung und Zurücksetzen sind auf 10 Versuche in 10 Minuten je Netz begrenzt. Die Meldung nennt kein Konto. Der Text einer falschen Anmeldung kommt weiterhin von Better Auth."
         : "Für Anmeldung und Registrierung ist in diesem Code kein eigenes Limit gesetzt.",
     },
     {
       id: "SECURITY_HEADERS",
-      status: "NOT_CONFIGURED",
-      note: "nosniff und Referrer-Policy werden auf HTML gesetzt. CSP, HSTS und X-Frame-Options sind nicht gesetzt, weil die Grok-Vorschau die App in einem iframe zeigt.",
+      status: "WARNING",
+      note: "nosniff, Referrer-Policy und eine enge Permissions-Policy setzt die HTML-Middleware. In der Vorschau kein HSTS und kein frame-ancestors. In Produktion frame-ancestors nur für die eigene Seite und https://grok.com. Eine Script-CSP ist nicht gesetzt, X-Frame-Options auch nicht.",
     },
     {
       id: "AUDIT_LOGGING",
@@ -115,7 +116,7 @@ export function buildSecurityReport(facts: SecurityFacts): {
     {
       id: "SSRF",
       status: facts.ssrfBlocksPrivate && facts.parameterizedSql ? "PASS" : "FAIL",
-      note: "Recherche-URLs müssen https sein. localhost, private Netze, Metadaten-Hosts und file: werden abgelehnt. SQL bleibt parametrisiert.",
+      note: "Recherche-URLs müssen https sein. localhost, private Netze, Metadaten-Hosts und file: werden abgelehnt. Nach der DNS-Auflösung wird die Zieladresse erneut geprüft. Weiterleitungen auch. SQL bleibt parametrisiert.",
     },
     {
       id: "PROMPT_BOUNDARY",
@@ -126,6 +127,33 @@ export function buildSecurityReport(facts: SecurityFacts): {
       id: "AGENT_ISOLATION",
       status: "WARNING",
       note: "Ein Rechtekatalog verweigert fremde Werkzeuge. Es gibt keinen separaten Tool-Runner, der das für jeden Agenten erzwingt.",
+    },
+    {
+      id: "STEP_UP",
+      status: facts.stepUp ? "WARNING" : "NOT_CONFIGURED",
+      note: facts.stepUp
+        ? "Export und Löschen gelten 10 Minuten nach einer Bestätigung in den Einstellungen. Das ist keine Passwort-Neueingabe und kein Hardware-Schlüssel."
+        : "Eine Bestätigung vor Export oder Löschen ist nicht gemeldet.",
+    },
+    {
+      id: "WEBAUTHN",
+      status: "NOT_CONFIGURED",
+      note: "WebAuthn oder ein Hardware-Schlüssel ist nicht eingerichtet. Es wird kein eigener Schlüssel gespeichert.",
+    },
+    {
+      id: "CORS",
+      status: "WARNING",
+      note: "Im Anwendungscode wurde kein Access-Control-Allow-Origin: * gefunden. Eine eigene CORS-Middleware ist nicht eingerichtet.",
+    },
+    {
+      id: "PRODUCTION_FAIL_CLOSED",
+      status: "WARNING",
+      note: "Ein Produktionsstart ohne Datenbank, Auth-Geheimnis oder Auth-URL wird abgelehnt. Diese Prüfung ist getestet. Diese Umgebung ist nicht automatisch Produktion. Das ist keine Aussage, dass die ausgelieferte Umgebung vollständig konfiguriert ist.",
+    },
+    {
+      id: "CODE_EXECUTION",
+      status: "NOT_CONFIGURED",
+      note: "Es gibt keinen Code-Ausführer und deshalb auch keine separate Ausführungssandbox.",
     },
   ];
   const passed = checks.filter((item) => item.status === "PASS").length;

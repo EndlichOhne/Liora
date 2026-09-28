@@ -24,6 +24,7 @@ import {
   renderInstallPageHtml,
   renderWebManifest,
 } from "../../scripts/grok-pwa-shared.mjs";
+import { documentHeaders } from "../../src/lib/security/headers";
 
 interface GrokPwaEvent {
   url: URL;
@@ -53,8 +54,10 @@ function injectHeadStreaming(response: Response, host: string): Response {
   );
   const headers = new Headers(response.headers);
   headers.delete("content-length");
-  headers.set("x-content-type-options", "nosniff");
-  headers.set("referrer-policy", "strict-origin-when-cross-origin");
+  const extra = documentHeaders({
+    deployed: Boolean(process.env.GROK_PROJECT_ID?.trim()) && process.env.NODE_ENV === "production",
+  });
+  for (const [key, value] of Object.entries(extra)) headers.set(key, value);
   return new Response(transformed, {
     status: response.status,
     statusText: response.statusText,
@@ -94,8 +97,6 @@ export default async function grokPwaMiddleware(
       headers: {
         "content-type": "text/html; charset=utf-8",
         "cache-control": "no-cache",
-        "x-content-type-options": "nosniff",
-        "referrer-policy": "strict-origin-when-cross-origin",
       },
     });
   }

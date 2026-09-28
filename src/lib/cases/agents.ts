@@ -16,6 +16,7 @@ import {
 } from "@/lib/cases/engine";
 import { runBenchmarks } from "@/lib/intelligence/engine";
 import { assertRate, recordUsage } from "@/lib/data.server";
+import { publicFetch } from "@/lib/security/public-fetch";
 import { nextScanRegion } from "@/lib/cases/intake";
 import {
   addAlert,
@@ -163,7 +164,7 @@ export async function runDeskTick(userId: string) {
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 8_000);
-      const res = await fetch(url, { signal: controller.signal, redirect: "manual", headers: { "user-agent": "LioraDesk/1.0" } });
+      const res = await publicFetch(url, { signal: controller.signal, headers: { "user-agent": "LioraDesk/1.0" } });
       clearTimeout(timer);
       if (res.status >= 300 && res.status < 400) note = "Weiterleitung wurde nicht gefolgt.";
       else if (!res.ok) note = `Seite antwortete ${res.status}. Nicht neu analysiert.`;

@@ -33,6 +33,7 @@ import {
   toggleTask,
   updateProfile,
   uploadFile,
+  confirmStepUp,
   getProject,
 } from "@/lib/data.server";
 
@@ -318,5 +319,12 @@ export const removeAccount = createServerFn({ method: "POST" })
   })
   .handler(async ({ context }) => {
     await deleteAccount(context.userId);
+    return { ok: true as const };
+  });
+
+export const confirmStep = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await confirmStepUp(context.userId);
     return { ok: true as const };
   });
