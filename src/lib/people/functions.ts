@@ -11,6 +11,7 @@ import {
   listSourceNetwork,
   markPersonReviewed,
 } from "@/lib/people/store";
+import { writeAudit } from "@/lib/security/log";
 
 function str(value: unknown, max: number) {
   return typeof value === "string" ? value.slice(0, max) : "";
@@ -60,7 +61,11 @@ export const loadPeople = createServerFn({ method: "GET" })
 export const loadPerson = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .validator((input: unknown) => ({ id: str(record(input).id, 80) }))
-  .handler(async ({ context, data }) => getPersonFile(context.userId, data.id));
+  .handler(async ({ context, data }) => {
+    const file = await getPersonFile(context.userId, data.id);
+    await writeAudit(context.userId, file ? "PERSON_ACCESSED" : "PERMISSION_DENIED", `person:${data.id}`, file ? "allow" : "not_found");
+    return file;
+  });
 
 export const openPerson = createServerFn({ method: "POST" })
   .middleware([authMiddleware])

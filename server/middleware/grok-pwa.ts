@@ -53,6 +53,8 @@ function injectHeadStreaming(response: Response, host: string): Response {
   );
   const headers = new Headers(response.headers);
   headers.delete("content-length");
+  headers.set("x-content-type-options", "nosniff");
+  headers.set("referrer-policy", "strict-origin-when-cross-origin");
   return new Response(transformed, {
     status: response.status,
     statusText: response.statusText,
@@ -92,6 +94,8 @@ export default async function grokPwaMiddleware(
       headers: {
         "content-type": "text/html; charset=utf-8",
         "cache-control": "no-cache",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "strict-origin-when-cross-origin",
       },
     });
   }

@@ -3,6 +3,7 @@ import { extractMemory, isMode } from "@/lib/domain";
 import { buildSystemPrompt } from "@/lib/ai/prompt";
 import type { ChatPart, ProviderMessage } from "@/lib/ai/provider";
 import { getAIProvider } from "@/lib/ai/xai.server";
+import { untrustedData } from "@/lib/security/check";
 import {
   assertRate,
   createConversation,
@@ -228,7 +229,10 @@ export async function runChat(opts: { userId: string; body: ChatInput; signal: A
     const parts: ChatPart[] = [];
     const fileBlocks = files
       .filter((f) => f.kind !== "image")
-      .map((f) => `<document name="${f.name}">\n${(f.extracted_text || "").slice(0, 12_000)}\n</document>`)
+      .map((file) => {
+        const body = untrustedData((file.extracted_text || "").slice(0, 12_000));
+        return `<document name="${file.name}">\n${body.data}\n</document>`;
+      })
       .join("\n\n")
       .slice(0, 36_000);
     const requestText = userContent || "Bitte analysiere die angehängten Dateien.";

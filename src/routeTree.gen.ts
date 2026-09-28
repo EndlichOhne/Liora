@@ -28,6 +28,7 @@ import { Route as ApiSpeakRouteImport } from './routes/api/speak'
 import { Route as CasesIdRouteImport } from './routes/cases/$id'
 import { Route as PeopleIdRouteImport } from './routes/people/$id'
 import { Route as ProjectsIdRouteImport } from './routes/projects/$id'
+import { Route as SettingsSecurityRouteImport } from './routes/settings/security'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 
 const IndexRoute = IndexRouteImport.update({
@@ -125,6 +126,11 @@ const ProjectsIdRoute = ProjectsIdRouteImport.update({
   path: '/$id',
   getParentRoute: () => ProjectsRoute,
 } as any)
+const SettingsSecurityRoute = SettingsSecurityRouteImport.update({
+  id: '/security',
+  path: '/security',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -144,13 +150,14 @@ export interface FileRoutesByFullPath {
   '/projects': typeof ProjectsRouteWithChildren
   '/research': typeof ResearchRoute
   '/reset': typeof ResetRoute
-  '/settings': typeof SettingsRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/system': typeof SystemRoute
   '/api/chat': typeof ApiChatRoute
   '/api/speak': typeof ApiSpeakRoute
   '/cases/$id': typeof CasesIdRoute
   '/people/$id': typeof PeopleIdRoute
   '/projects/$id': typeof ProjectsIdRoute
+  '/settings/security': typeof SettingsSecurityRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesByTo {
@@ -166,13 +173,14 @@ export interface FileRoutesByTo {
   '/projects': typeof ProjectsRouteWithChildren
   '/research': typeof ResearchRoute
   '/reset': typeof ResetRoute
-  '/settings': typeof SettingsRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/system': typeof SystemRoute
   '/api/chat': typeof ApiChatRoute
   '/api/speak': typeof ApiSpeakRoute
   '/cases/$id': typeof CasesIdRoute
   '/people/$id': typeof PeopleIdRoute
   '/projects/$id': typeof ProjectsIdRoute
+  '/settings/security': typeof SettingsSecurityRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesById {
@@ -189,13 +197,14 @@ export interface FileRoutesById {
   '/projects': typeof ProjectsRouteWithChildren
   '/research': typeof ResearchRoute
   '/reset': typeof ResetRoute
-  '/settings': typeof SettingsRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/system': typeof SystemRoute
   '/api/chat': typeof ApiChatRoute
   '/api/speak': typeof ApiSpeakRoute
   '/cases/$id': typeof CasesIdRoute
   '/people/$id': typeof PeopleIdRoute
   '/projects/$id': typeof ProjectsIdRoute
+  '/settings/security': typeof SettingsSecurityRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRouteTypes {
@@ -220,6 +229,7 @@ export interface FileRouteTypes {
     | '/cases/$id'
     | '/people/$id'
     | '/projects/$id'
+    | '/settings/security'
     | '/api/auth/$'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -242,6 +252,7 @@ export interface FileRouteTypes {
     | '/cases/$id'
     | '/people/$id'
     | '/projects/$id'
+    | '/settings/security'
     | '/api/auth/$'
   id:
     | '__root__'
@@ -264,6 +275,7 @@ export interface FileRouteTypes {
     | '/cases/$id'
     | '/people/$id'
     | '/projects/$id'
+    | '/settings/security'
     | '/api/auth/$'
   fileRoutesById: FileRoutesById
 }
@@ -280,7 +292,7 @@ export interface RootRouteChildren {
   ProjectsRoute: typeof ProjectsRouteWithChildren
   ResearchRoute: typeof ResearchRoute
   ResetRoute: typeof ResetRoute
-  SettingsRoute: typeof SettingsRoute
+  SettingsRoute: typeof SettingsRouteWithChildren
   SystemRoute: typeof SystemRoute
   ApiChatRoute: typeof ApiChatRoute
   ApiSpeakRoute: typeof ApiSpeakRoute
@@ -422,6 +434,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectsIdRouteImport
       parentRoute: typeof ProjectsRoute
     }
+    '/settings/security': {
+      id: '/settings/security'
+      path: '/security'
+      fullPath: '/settings/security'
+      preLoaderRoute: typeof SettingsSecurityRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
@@ -465,6 +484,18 @@ const ProjectsRouteWithChildren = ProjectsRoute._addFileChildren(
   ProjectsRouteChildren,
 )
 
+interface SettingsRouteChildren {
+  SettingsSecurityRoute: typeof SettingsSecurityRoute
+}
+
+const SettingsRouteChildren: SettingsRouteChildren = {
+  SettingsSecurityRoute: SettingsSecurityRoute,
+}
+
+const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
+  SettingsRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ActivityRoute: ActivityRoute,
@@ -478,7 +509,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProjectsRoute: ProjectsRouteWithChildren,
   ResearchRoute: ResearchRoute,
   ResetRoute: ResetRoute,
-  SettingsRoute: SettingsRoute,
+  SettingsRoute: SettingsRouteWithChildren,
   SystemRoute: SystemRoute,
   ApiChatRoute: ApiChatRoute,
   ApiSpeakRoute: ApiSpeakRoute,

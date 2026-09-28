@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { authClient, getBearerToken, signOut } from "@/lib/auth/client";
 import { UserButton } from "@/lib/auth/gates";
 import { AppFrame, PageHead, useApp } from "@/components/app-frame";
@@ -11,11 +11,9 @@ import { loadModels } from "@/lib/intelligence/functions";
 export const Route = createFileRoute("/settings")({ component: SettingsRoute });
 
 function SettingsRoute() {
-  return (
-    <AppFrame>
-      <SettingsPage />
-    </AppFrame>
-  );
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const child = pathname.startsWith("/settings/") && pathname !== "/settings";
+  return <AppFrame>{child ? <Outlet /> : <SettingsPage />}</AppFrame>;
 }
 
 function SettingsPage() {
@@ -100,6 +98,7 @@ function SettingsPage() {
           <h2 className="font-medium">Account</h2>
           <UserButton />
           <p className="text-sm text-muted">{user.primaryEmail}</p>
+          <p className="text-sm"><Link to="/settings/security" className="underline">Sicherheit</Link></p>
           <Field label="Name">
             <input className={inputClass} value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
           </Field>

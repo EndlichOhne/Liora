@@ -129,7 +129,7 @@ async function createPgliteSql(): Promise<Sql> {
   });
   const pg = await globalRef.__pgliteInstance__;
 
-  // Apply migrations/ (the single schema source, including research tasks, case candidates, person files and person links) so preview matches production.
+  // Apply migrations/ (the single schema source, including research tasks, case candidates, person files, person links and the audit log) so preview matches production.
   // SQL is inlined by the bundler via import.meta.glob (no runtime fs); applied
   // files are tracked in _migrations. The glob does not descend, so the opt-in
   // auth schema under migrations/auth/ stays out. Runs once per module instance

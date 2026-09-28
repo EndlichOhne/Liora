@@ -6,6 +6,7 @@ import { contentHash, safePublicUrl } from "@/lib/cases/engine";
 import { rejectDiscoveryClaim } from "@/lib/cases/discovery";
 import { normalizeName, personResearchRequest } from "@/lib/people/rules";
 import { noteSourceMentions } from "@/lib/people/store";
+import { redactError } from "@/lib/security/check";
 import {
   buildPlan,
   scopeFor,
@@ -451,7 +452,7 @@ export async function startResearchTask(
     if (personNote) summary = `${summary} ${personNote}`.slice(0, 1000);
     await setStatus(userId, id, nextStatus("running", "finish"), { summary });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Recherche fehlgeschlagen.";
+    const message = redactError(error instanceof Error ? error.message : "Recherche fehlgeschlagen.");
     await setStatus(userId, id, nextStatus("running", "fail"), { error: message, summary: message });
     throw error;
   }

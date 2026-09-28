@@ -32,6 +32,7 @@ import {
 import { isCaseStatus } from "@/lib/cases/engine";
 import { isFeatureKey, isOrigin } from "@/lib/cases/discovery";
 import { fileFromCaseMention } from "@/lib/people/store";
+import { writeAudit } from "@/lib/security/log";
 
 function str(value: unknown, max: number) {
   return typeof value === "string" ? value.slice(0, max) : "";
@@ -58,7 +59,11 @@ export const loadDesk = createServerFn({ method: "GET" })
 export const loadCase = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .validator((input: unknown) => ({ id: str(record(input).id, 80) }))
-  .handler(async ({ context, data }) => getCaseFile(context.userId, data.id));
+  .handler(async ({ context, data }) => {
+    const file = await getCaseFile(context.userId, data.id);
+    await writeAudit(context.userId, file ? "CASE_ACCESSED" : "PERMISSION_DENIED", `case:${data.id}`, file ? "allow" : "not_found");
+    return file;
+  });
 
 export const openCase = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
