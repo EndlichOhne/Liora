@@ -34,6 +34,7 @@ import {
   saveCaseMeta,
 } from "@/lib/cases/functions";
 import { formatWhen } from "@/lib/domain";
+import { loadResearch, startResearch } from "@/lib/research/functions";
 
 export const Route = createFileRoute("/cases/$id")({ component: CaseRoute });
 
@@ -67,6 +68,9 @@ function CasePage({ id }: { id: string }) {
   const [note, setNote] = useState("");
   const [form, setForm] = useState<Form>(null);
   const [busy, setBusy] = useState(false);
+  const [web, setWeb] = useState(false);
+  const [researchId, setResearchId] = useState("");
+  const [researchFile, setResearchFile] = useState<Awaited<ReturnType<typeof loadResearch>>>(null);
 
   function load() {
     return loadCase({ data: { id } })
@@ -101,22 +105,51 @@ function CasePage({ id }: { id: string }) {
         kicker={entry.code}
         title={entry.title}
         action={
-          <Button
-            disabled={busy}
-            onClick={() => {
-              setBusy(true);
-              setError("");
-              void reviewCase({ data: { id } })
-                .then((result) => {
-                  setNote(result.note);
-                  return load();
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                setError("");
+                void reviewCase({ data: { id } })
+                  .then((result) => {
+                    setNote(result.note);
+                    return load();
+                  })
+                  .catch((err: unknown) => setError(err instanceof Error ? err.message : "Die Prüfung ist fehlgeschlagen."))
+                  .finally(() => setBusy(false));
+              }}
+            >
+              {busy ? "Prüft" : "Lokal prüfen"}
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                setError("");
+                void startResearch({
+                  data: {
+                    request: `Untersuche diesen Fall öffentlich: ${entry.title}. ${entry.city || region}.`,
+                    web,
+                    caseId: id,
+                  },
                 })
-                .catch((err: unknown) => setError(err instanceof Error ? err.message : "Die Prüfung ist fehlgeschlagen."))
-                .finally(() => setBusy(false));
-            }}
-          >
-            {busy ? "Prüft" : "Lokal prüfen"}
-          </Button>
+                  .then((result) => {
+                    setNote(result.summary);
+                    if (result.task) {
+                      setResearchId(result.task.id);
+                      return loadResearch({ data: { id: result.task.id } }).then(setResearchFile);
+                    }
+                    return undefined;
+                  })
+                  .catch((err: unknown) => setError(err instanceof Error ? err.message : "Die Recherche ist fehlgeschlagen."))
+                  .finally(() => setBusy(false));
+              }}
+            >
+              Öffentlich recherchieren
+            </Button>
+          </div>
         }
       />
       <PageBody wide>
@@ -140,6 +173,10 @@ function CasePage({ id }: { id: string }) {
         {entry.investigationStatus ? <p className="text-sm">Ermittlungsstand laut Quelle: {entry.investigationStatus}</p> : null}
         {entry.summary ? <p className="mt-3 max-w-3xl text-base leading-relaxed">{entry.summary}</p> : <p className="mt-3 text-sm text-muted">Keine Zusammenfassung.</p>}
         {note ? <p className="mt-3 max-w-3xl text-sm">{note}</p> : null}
+        <label className="mt-3 flex min-h-11 items-center gap-2 text-sm">
+          <input type="checkbox" checked={web} onChange={(event) => setWeb(event.target.checked)} />
+          Websuche für „Öffentlich recherchieren“ erlauben
+        </label>
         {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
 
         <div className="mt-4 flex flex-wrap gap-2">
@@ -260,6 +297,51 @@ function CasePage({ id }: { id: string }) {
         </section>
 
         <DiscoveryPanel caseId={id} />
+
+        {researchFile ? (
+          <section className="mt-6">
+            <h2 className="font-display text-2xl tracking-tight">Recherche</h2>
+            <p className="mt-1 text-sm text-muted">{researchFile.task.status} · {researchFile.task.scope} · {researchId}</p>
+            {researchFile.task.resultSummary ? <p className="mt-2 text-sm">{researchFile.task.resultSummary}</p> : null}
+            <div className="mt-3 grid gap-3 lg:grid-cols-2">
+              <Panel>
+                <h3 className="text-sm">Quellen</h3>
+                {researchFile.sources.length === 0 ? <p className="mt-2 text-sm text-muted">Keine neue öffentliche Quelle.</p> : null}
+                <ul className="mt-2 space-y-1 text-sm">
+                  {researchFile.sources.map((source) => (
+                    <li key={source.id}>{source.title || source.url} · {source.independenceStatus}</li>
+                  ))}
+                </ul>
+              </Panel>
+              <Panel>
+                <h3 className="text-sm">Offene Fragen</h3>
+                {researchFile.questions.length === 0 ? <p className="mt-2 text-sm text-muted">Keine offene Frage aus den gespeicherten Angaben.</p> : null}
+                <ul className="mt-2 space-y-1 text-sm">
+                  {researchFile.questions.map((item) => (
+                    <li key={item.id}>{item.question} · {item.status}</li>
+                  ))}
+                </ul>
+              </Panel>
+              <Panel>
+                <h3 className="text-sm">Timeline</h3>
+                {researchFile.timeline.length === 0 ? <p className="mt-2 text-sm text-muted">Keine Ereignisse. Nichts geschätzt.</p> : null}
+                <ul className="mt-2 space-y-1 text-sm">
+                  {researchFile.timeline.map((event, index) => (
+                    <li key={`${event.event}-${index}`}>{event.date} · {event.time} · {event.location}</li>
+                  ))}
+                </ul>
+              </Panel>
+              <Panel>
+                <h3 className="text-sm">Verlauf</h3>
+                <ul className="mt-2 space-y-1 text-sm">
+                  {researchFile.session.map((item) => (
+                    <li key={item.id}>{item.title} · {item.status}</li>
+                  ))}
+                </ul>
+              </Panel>
+            </div>
+          </section>
+        ) : null}
 
         <section className="mt-6">
           <h2 className="font-display text-2xl tracking-tight">Meldungen zu dieser Akte</h2>
