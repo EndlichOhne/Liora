@@ -4,7 +4,7 @@ import {
   classifyContradiction,
   contentHash,
   isEvidence,
-  leadsFromCitations,
+  REGION_LABEL,
   reviewPublicStatement,
   safePublicUrl,
   scanFocus,
@@ -16,14 +16,13 @@ import {
 } from "@/lib/cases/engine";
 import { runBenchmarks } from "@/lib/intelligence/engine";
 import { assertRate, recordUsage } from "@/lib/data.server";
+import { nextScanRegion } from "@/lib/cases/intake";
 import {
   addAlert,
   addContradiction,
   casesMissingSource,
   contradictionExists,
-  findCaseByTitle,
   getCaseFile,
-  insertLead,
   itemsForContradiction,
   listColdCases,
   loadSignals,
@@ -31,6 +30,7 @@ import {
   recordJob,
   saveWatchCheck,
   compareStored,
+  settlePublicHits,
 } from "@/lib/cases/store";
 
 async function searchOnce(query: string) {
@@ -59,6 +59,42 @@ async function searchOnce(query: string) {
     clearTimeout(timer);
   }
   return citations;
+}
+
+export async function researchPublicCases(userId: string) {
+  try {
+    await assertRate(userId, "case_scan", 6, "1 day");
+  } catch (err) {
+    const note = err instanceof Error ? err.message : "Zu viele Anfragen in kurzer Zeit.";
+    await recordJob(userId, { agent: "web_research", kind: "public_cases", status: "failed", web: false, reason: "Kontingent", result: note });
+    return { note, adopted: 0, waiting: 0, duplicates: 0, sources: 0 };
+  }
+  await recordUsage(userId, "case_scan");
+  const signals = await loadSignals(userId);
+  const region = nextScanRegion(signals.lastScan);
+  const focus = scanFocus(Math.floor(Date.now() / 86_400_000));
+  let citations: { url: string; title?: string; snippet?: string }[] = [];
+  try {
+    citations = await searchOnce(scanQuery(region, focus));
+  } catch (err) {
+    const raw = err instanceof Error ? err.message : "";
+    const message = /abort/i.test(raw) ? "Die Suche hat das Zeitlimit erreicht. Es wurde nichts angelegt." : raw.slice(0, 240) || "Suche fehlgeschlagen.";
+    const note = `Suche nicht abgeschlossen. ${message}`;
+    await recordJob(userId, { agent: "web_research", kind: "public_cases", region, status: "failed", web: true, reason: scanQuery(region, focus), result: note });
+    return { note, adopted: 0, waiting: 0, duplicates: 0, sources: 0 };
+  }
+  const settled = await settlePublicHits(userId, citations);
+  const note = citations.length ? settled.note : "Keine neuen öffentlichen Fälle gefunden.";
+  await recordJob(userId, {
+    agent: "web_research",
+    kind: "public_cases",
+    region,
+    status: "done",
+    web: true,
+    reason: `${REGION_LABEL[region]} öffentlich prüfen.`,
+    result: note,
+  });
+  return { note, adopted: settled.adopted, waiting: settled.waiting, duplicates: settled.duplicates, sources: settled.sources };
 }
 
 function pageText(html: string) {
@@ -102,39 +138,12 @@ export async function runDeskTick(userId: string) {
       await recordJob(userId, { agent: plan.agent, kind: plan.kind, region: plan.region, status: "failed", web: true, reason: plan.reason, result: note });
       return { kind: plan.kind, web: true, note, createdLeads: 0 };
     }
-    const { kept, dropped } = leadsFromCitations(citations);
-    let created = 0;
-    let attached = 0;
-    for (const lead of kept) {
-      const match = await findCaseByTitle(userId, lead.title ?? "");
-      if (match) {
-        await addAlert(userId, {
-          caseId: match.id,
-          title: "Mögliche Aktualisierung",
-          body: lead.title || lead.url,
-          source: lead.url,
-          evidence: lead.evidence,
-        });
-        attached += 1;
-        continue;
-      }
-      const saved = await insertLead(userId, {
-        region: lead.region,
-        title: lead.title || lead.url,
-        url: lead.url,
-        snippet: lead.snippet ?? "",
-        evidence: lead.evidence,
-        kind: lead.kind,
-        originKey: lead.originKey,
-        publisher: lead.kind,
-      });
-      if (saved.fresh) created += 1;
-    }
+    const settled = await settlePublicHits(userId, citations);
     const note = citations.length
-      ? `${focusLabel}: ${created} neue Hinweise, ${attached} an bestehende Fälle gelegt, ${dropped} verworfen. Kein Fall wurde erfunden.`
+      ? `${focusLabel}: ${settled.note}`
       : `${focusLabel}: Die Suche hat keine Quelle zurückgegeben. Nichts angelegt.`;
     await recordJob(userId, { agent: plan.agent, kind: plan.kind, region: plan.region, status: "done", web: true, reason: plan.reason, result: note });
-    return { kind: plan.kind, web: true, note, createdLeads: created };
+    return { kind: plan.kind, web: true, note, createdLeads: settled.adopted };
   }
   if (plan.kind === "recheck_source") {
     const watch = await nextStaleWatch(userId);

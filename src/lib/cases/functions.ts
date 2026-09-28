@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware } from "@/lib/auth/middleware";
-import { reviewStoredCase, runDeskTick, runDiscoveryJob } from "@/lib/cases/agents";
+import { researchPublicCases, reviewStoredCase, runDeskTick, runDiscoveryJob } from "@/lib/cases/agents";
 import {
   addEdge,
   addEvent,
@@ -9,8 +9,10 @@ import {
   addPerson,
   attachLead,
   createCase,
+  decideCandidate,
   dismissLead,
   getCaseFile,
+  listCandidates,
   listCases,
   listLeads,
   listOpenAlerts,
@@ -22,6 +24,7 @@ import {
   parseEvidence,
   parseRole,
   promoteLead,
+  reviewOpenCandidates,
   updateCase,
   addUserFeature,
   loadDiscoveryView,
@@ -40,14 +43,15 @@ function record(input: unknown): Record<string, unknown> {
 export const loadDesk = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
-    const [board, cases, leads, alerts, watches] = await Promise.all([
+    const [board, cases, leads, alerts, watches, candidates] = await Promise.all([
       loadBoard(context.userId),
       listCases(context.userId, {}),
       listLeads(context.userId),
       listOpenAlerts(context.userId),
       listWatches(context.userId),
+      listCandidates(context.userId),
     ]);
-    return { board, cases, leads, alerts, watches };
+    return { board, cases, leads, alerts, watches, candidates };
   });
 
 export const loadCase = createServerFn({ method: "GET" })
@@ -227,6 +231,22 @@ export const archiveEntry = createServerFn({ method: "POST" })
 export const stepDesk = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => runDeskTick(context.userId));
+
+export const researchCases = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => researchPublicCases(context.userId));
+
+export const reviewCandidates = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => reviewOpenCandidates(context.userId));
+
+export const settleCandidate = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: unknown) => {
+    const data = record(input);
+    return { id: str(data.id, 80), accept: data.accept === true };
+  })
+  .handler(async ({ context, data }) => decideCandidate(context.userId, data.id, data.accept));
 
 export const reviewCase = createServerFn({ method: "POST" })
   .middleware([authMiddleware])

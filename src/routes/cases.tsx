@@ -17,7 +17,7 @@ import {
   type CaseType,
   type Region,
 } from "@/lib/cases/engine";
-import { bindLead, dropLead, keepLead, loadDesk, openCase, seeAlert, stepDesk } from "@/lib/cases/functions";
+import { bindLead, dropLead, keepLead, loadDesk, openCase, researchCases, reviewCandidates, seeAlert, settleCandidate, stepDesk } from "@/lib/cases/functions";
 import { DiscoveryPanel } from "@/components/discovery-panel";
 import { formatWhen } from "@/lib/domain";
 
@@ -47,6 +47,7 @@ const KINDS: Record<string, string> = {
   benchmark: "Test",
   idle: "Ruhe",
   deep_case: "Akte",
+  public_cases: "Öffentliche Fälle",
 };
 
 function sourceLabel(kind: string) {
@@ -56,6 +57,20 @@ function sourceLabel(kind: string) {
 function evidenceLabel(value: string) {
   return isEvidence(value) ? EVIDENCE_LABEL[value] : "Unbekannt";
 }
+
+const CANDIDATE_LABEL: Record<string, string> = {
+  candidate: "Kandidat",
+  verified_public: "Öffentlich übernommen",
+  duplicate: "Dublette",
+  rejected: "Verworfen",
+  needs_review: "Prüfung nötig",
+};
+
+const CONFIDENCE_LABEL: Record<string, string> = {
+  low: "gering",
+  limited: "begrenzt",
+  notable: "auffällig, nicht belegt",
+};
 
 function CasesRoute() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
@@ -105,6 +120,40 @@ function CasesPage() {
   useEffect(() => {
     void load();
   }, []);
+
+  async function runResearch() {
+    if (running.current) return;
+    running.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await researchCases();
+      setNote(result.note);
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Die Recherche ist fehlgeschlagen.");
+    } finally {
+      running.current = false;
+      setBusy(false);
+    }
+  }
+
+  async function runReview() {
+    if (running.current) return;
+    running.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await reviewCandidates();
+      setNote(result.note);
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Die Prüfung ist fehlgeschlagen.");
+    } finally {
+      running.current = false;
+      setBusy(false);
+    }
+  }
 
   async function runStep() {
     if (running.current) return;
@@ -160,6 +209,15 @@ function CasesPage() {
           Öffentliche Recherche. Keine Polizei, kein Gericht, keine Beschuldigung. Zuerst Karlsruhe, dann Stuttgart, Mannheim, Rastatt, Baden-Württemberg, Deutschland. Ausland nur, wenn ein deutscher Fall es braucht.
         </p>
         <p className="mt-2 text-sm text-muted">Solange diese Seite offen ist, läuft höchstens alle 110 Sekunden ein Schritt. Websuche höchstens sechsmal am Tag. Unveränderte Quellen werden nicht neu analysiert.</p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button disabled={busy} onClick={() => void runResearch()}>{busy ? "Arbeitet" : "Öffentliche Fälle recherchieren"}</Button>
+          <Button variant="ghost" disabled={busy} onClick={() => void runReview()}>Neue Fälle prüfen</Button>
+        </div>
+        {desk?.board.lastResearch ? (
+          <p className="mt-3 text-sm">Letzte Recherche: {desk.board.lastResearch.result}{desk.board.lastResearch.at ? ` · ${formatWhen(desk.board.lastResearch.at)}` : ""}</p>
+        ) : (
+          <p className="mt-3 text-sm text-muted">Letzte Recherche: noch keine.</p>
+        )}
         {note ? <p className="mt-3 text-sm">{note}</p> : null}
         {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
 
@@ -181,6 +239,8 @@ function CasesPage() {
           <Metric label="Cold Cases" value={desk?.board.cold ?? 0} onClick={() => setStatus((value) => (value === "cold" ? "" : "cold"))} active={status === "cold"} />
           <Metric label="Vermisst" value={desk?.board.missing ?? 0} onClick={() => setCaseType((value) => (value === "missing" ? "" : "missing"))} active={caseType === "missing"} />
           <Metric label="Hinweise" value={desk?.board.leads ?? 0} />
+          <Metric label="Fallkandidaten" value={desk?.board.candidates ?? 0} />
+          <Metric label="Übernommen" value={desk?.board.adopted ?? 0} />
           <Metric label="Meldungen" value={desk?.board.alerts ?? 0} />
           <Metric label="Widersprüche" value={desk?.board.contradictions ?? 0} />
           <Metric label="Quellen" value={desk?.board.sources ?? 0} />
@@ -300,7 +360,7 @@ function CasesPage() {
 
         <section className="mt-6">
           <h2 className="font-display text-2xl tracking-tight">Hinweise</h2>
-          <p className="mt-1 text-sm text-muted">Suchtreffer werden nicht zu Fällen. Du übernimmst sie oder verwirfst sie.</p>
+          <p className="mt-1 text-sm text-muted">Ein allgemeiner Suchtreffer bleibt ein Hinweis. Nur ein konkreter öffentlicher Fall kann in die Fallbank.</p>
           {desk && desk.leads.length === 0 ? <div className="mt-3"><Empty title="Keine offenen Hinweise" body="Eine Suche legt nur dann etwas an, wenn eine öffentliche deutsche Quelle zurückkommt." /></div> : null}
           <div className="mt-3 grid gap-2">
             {desk?.leads.map((lead) => (
@@ -359,6 +419,57 @@ function CasesPage() {
         </section>
 
         <section className="mt-6">
+          <h2 className="font-display text-2xl tracking-tight">Fallkandidaten</h2>
+          <p className="mt-1 text-sm text-muted">Eine Quelle wird erst ein Fall, wenn sie einen konkreten öffentlichen Vorfall beschreibt. Medienberichte bleiben zur Prüfung. Fehlende Angaben bleiben leer.</p>
+          {desk && desk.candidates.length === 0 ? <div className="mt-3"><Empty title="Keine Fallkandidaten" body="Keine neuen öffentlichen Fälle gefunden." /></div> : null}
+          <div className="mt-3 grid gap-2">
+            {desk?.candidates.map((item) => (
+              <article key={item.id} className="rounded-lg border border-border bg-card px-4 py-3">
+                <p className="text-xs text-muted">
+                  {CANDIDATE_LABEL[item.status] ?? item.status}
+                  {" · "}
+                  {isRegion(item.region) ? REGION_LABEL[item.region] : item.region}
+                  {item.city ? ` · ${item.city}` : " · CITY MISSING"}
+                  {" · "}
+                  {evidenceLabel(item.evidence)}
+                  {" · "}
+                  {CONFIDENCE_LABEL[item.confidence] ?? item.confidence}
+                </p>
+                <h3 className="mt-1 text-base">{item.title}</h3>
+                {item.summary ? <p className="mt-1 text-sm text-muted">{item.summary}</p> : null}
+                {item.missing ? <p className="mt-1 text-xs text-muted">{item.missing}</p> : null}
+                {item.openedOn ? <p className="mt-1 text-xs text-muted">{item.openedOn}</p> : <p className="mt-1 text-xs text-muted">DATE MISSING</p>}
+                {item.sourceUrl ? <a className="mt-1 block truncate text-sm underline" href={item.sourceUrl} target="_blank" rel="noreferrer">{item.sourceUrl}</a> : <p className="mt-1 text-sm text-muted">SOURCE MISSING</p>}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {item.caseId ? <Link to="/cases/$id" params={{ id: item.caseId }} className="inline-flex min-h-11 items-center text-sm underline">Akte</Link> : null}
+                  {!item.caseId && item.status !== "rejected" && item.status !== "duplicate" ? (
+                    <Button
+                      onClick={() => {
+                        void settleCandidate({ data: { id: item.id, accept: true } })
+                          .then(() => load())
+                          .catch((err: unknown) => setError(err instanceof Error ? err.message : "Kandidat nicht übernommen."));
+                      }}
+                    >
+                      In die Fallbank
+                    </Button>
+                  ) : null}
+                  {item.status !== "rejected" && item.status !== "verified_public" && !item.caseId ? (
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        void settleCandidate({ data: { id: item.id, accept: false } }).then(() => load());
+                      }}
+                    >
+                      Verwerfen
+                    </Button>
+                  ) : null}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-6">
           <h2 className="font-display text-2xl tracking-tight">Meldungen</h2>
           {desk && desk.alerts.length === 0 ? <div className="mt-3"><Empty title="Keine neue Meldung" body="Eine Meldung entsteht nur, wenn eine Quelle sich ändert oder zu einer bestehenden Akte passt." /></div> : null}
           <div className="mt-3 grid gap-2">
@@ -392,7 +503,7 @@ function CasesPage() {
               <Button variant="ghost" onClick={() => { setRegion(""); setStatus(""); setCaseType(""); }}>Filter aus</Button>
             </div>
           </div>
-          {desk && cases.length === 0 ? <div className="mt-3"><Empty title="Keine Akte" body="Es ist nichts gespeichert, das zu diesem Filter passt. Es wird kein Fall erfunden." /></div> : null}
+          {desk && cases.length === 0 ? <div className="mt-3"><Empty title="Keine Akte" body={desk.cases.length === 0 ? "Die Fallbank ist leer, bis eine konkrete öffentliche Quelle übernommen wird. Es wird kein Fall erfunden." : "Es ist nichts gespeichert, das zu diesem Filter passt. Es wird kein Fall erfunden."} /></div> : null}
           <div className="mt-3 grid gap-2">
             {cases.map((item) => (
               <Link key={item.id} to="/cases/$id" params={{ id: item.id }} className="rounded-lg border border-border bg-card px-4 py-3 transition-colors duration-150 hover:bg-subtle">

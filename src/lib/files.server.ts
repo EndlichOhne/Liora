@@ -127,6 +127,6 @@ export async function extractUpload(name: string, mime: string, buf: Buffer): Pr
     }
   }
 
-  const text = buf.toString("utf8").replace(/\u0000/g, "").slice(0, MAX_TEXT);
+  const text = buf.toString("utf8").split(String.fromCharCode(0)).join("").slice(0, MAX_TEXT);
   return { kind: "text", text, imageData: null };
 }

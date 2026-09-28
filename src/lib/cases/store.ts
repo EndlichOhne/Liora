@@ -17,18 +17,29 @@ import {
   similarityNote,
   SEED_WATCHES,
   allowPerson,
+  contentHash,
+  hostOf,
   isCaseStatus,
   isCaseType,
   isEvidence,
   isPersonRole,
   isRegion,
+  leadsFromCitations,
   rejectAsFact,
   type CaseStatus,
   type CaseType,
+  type CitationHit,
   type EvidenceClass,
   type PersonRole,
   type Region,
 } from "@/lib/cases/engine";
+import {
+  draftFromHit,
+  matchDuplicate,
+  researchOutcome,
+  type CaseDraft,
+  type KnownRecord,
+} from "@/lib/cases/intake";
 
 function text(value: unknown): string {
   if (value == null) return "";
@@ -524,6 +535,378 @@ export async function attachLead(userId: string, leadId: string, caseId: string)
   await db`update ci_leads set status = 'attached', case_id = ${caseId} where id = ${leadId} and user_id = ${userId}`;
 }
 
+async function loadKnown(userId: string): Promise<KnownRecord[]> {
+  const db = await sql();
+  const cases = await db<{ id: string; title: string; city: string; opened_on: string; case_type: string }>`
+    select id, title, city, opened_on, case_type from ci_cases where user_id = ${userId} order by updated_at desc limit 200
+  `;
+  const items = await db<{ case_id: string; source_url: string }>`
+    select case_id, source_url from ci_case_items where user_id = ${userId} and source_url <> '' limit 400
+  `;
+  const candidates = await db<{ id: string; title: string; city: string; opened_on: string; case_type: string; source_url: string; origin_key: string; case_id: string | null }>`
+    select id, title, city, opened_on, case_type, source_url, origin_key, case_id
+    from ci_case_candidates where user_id = ${userId} order by updated_at desc limit 200
+  `;
+  const urls = new Map<string, string[]>();
+  for (const item of items) {
+    const list = urls.get(item.case_id) ?? [];
+    list.push(item.source_url);
+    urls.set(item.case_id, list);
+  }
+  const fromCases: KnownRecord[] = cases.map((row) => ({
+    id: row.id,
+    kind: "case",
+    title: row.title,
+    city: row.city,
+    openedOn: row.opened_on,
+    caseType: row.case_type,
+    sourceUrls: urls.get(row.id) ?? [],
+    originKeys: candidates.filter((item) => item.case_id === row.id && item.origin_key).map((item) => item.origin_key),
+  }));
+  const fromCandidates: KnownRecord[] = candidates.map((row) => ({
+    id: row.id,
+    kind: "candidate",
+    title: row.title,
+    city: row.city,
+    openedOn: row.opened_on,
+    caseType: row.case_type,
+    sourceUrls: row.source_url ? [row.source_url] : [],
+    originKeys: row.origin_key ? [row.origin_key] : [],
+  }));
+  return [...fromCases, ...fromCandidates];
+}
+
+async function rememberCaseSource(userId: string, draft: CaseDraft): Promise<{ id: string; fresh: boolean }> {
+  const db = await sql();
+  const existing = await db<{ id: string }>`select id from ci_sources where user_id = ${userId} and url = ${draft.sourceUrl} limit 1`;
+  if (existing[0]) return { id: existing[0].id, fresh: false };
+  const id = crypto.randomUUID();
+  const reliability = draft.evidence === "official" || draft.evidence === "court" ? "high" : draft.evidence === "documented" ? "medium" : "low";
+  await db`
+    insert into ci_sources (id, user_id, url, title, kind, reliability, note, checked_at, content_hash, publisher, independence_status)
+    values (
+      ${id}, ${userId}, ${draft.sourceUrl.slice(0, 500)}, ${draft.title.slice(0, 180)}, ${draft.kind}, ${reliability},
+      ${draft.summary.slice(0, 500)}, now(), ${contentHash(draft.sourceUrl)}, ${hostOf(draft.sourceUrl).slice(0, 120)}, 'unknown'
+    )
+  `;
+  return { id, fresh: true };
+}
+
+async function insertCandidate(userId: string, draft: CaseDraft, sourceId: string, status: string, caseId: string | null) {
+  const db = await sql();
+  const existing = draft.originKey
+    ? await db<{ id: string; source_ids: string }>`
+        select id, source_ids from ci_case_candidates where user_id = ${userId} and origin_key = ${draft.originKey} limit 1
+      `
+    : [];
+  if (existing[0]) {
+    const ids = existing[0].source_ids.split(",").map((item) => item.trim()).filter(Boolean);
+    if (!ids.includes(sourceId)) ids.push(sourceId);
+    await db`
+      update ci_case_candidates set source_ids = ${ids.join(",")}, updated_at = now()
+      where id = ${existing[0].id} and user_id = ${userId}
+    `;
+    return { id: existing[0].id, fresh: false };
+  }
+  const id = crypto.randomUUID();
+  await db`
+    insert into ci_case_candidates (
+      id, user_id, title, region, city, case_type, case_status, opened_on, summary, source_ids, source_url,
+      origin_key, evidence_class, confidence, status, missing_note, case_id
+    ) values (
+      ${id}, ${userId}, ${draft.title}, ${draft.region}, ${draft.city}, ${draft.caseType}, ${draft.caseStatus},
+      ${draft.openedOn}, ${draft.summary}, ${sourceId}, ${draft.sourceUrl.slice(0, 500)}, ${draft.originKey.slice(0, 200)},
+      ${draft.evidence}, ${draft.confidence}, ${status}, ${draft.missing.join(", ")}, ${caseId}
+    )
+  `;
+  return { id, fresh: true };
+}
+
+async function adoptDraft(userId: string, draft: CaseDraft, candidateId: string) {
+  const stateName = draft.region === "de" ? "" : "Baden-Württemberg";
+  const created = await createCase(userId, {
+    title: draft.title,
+    region: draft.region,
+    stateName,
+    city: draft.city,
+    caseType: draft.caseType,
+    caseStatus: draft.caseStatus,
+    summary: draft.summary,
+    openedOn: draft.openedOn,
+  });
+  await addItem(userId, {
+    caseId: created.id,
+    kind: "source",
+    evidence: draft.evidence,
+    body: draft.summary,
+    sourceUrl: draft.sourceUrl,
+  });
+  const db = await sql();
+  await db`
+    update ci_case_candidates
+    set status = 'verified_public', case_id = ${created.id}, updated_at = now()
+    where id = ${candidateId} and user_id = ${userId}
+  `;
+  await db`update ci_sources set case_id = ${created.id} where user_id = ${userId} and url = ${draft.sourceUrl}`;
+  return created;
+}
+
+export async function settlePublicHits(userId: string, hits: CitationHit[]) {
+  const { kept, dropped } = leadsFromCitations(hits);
+  let adopted = 0;
+  let waiting = 0;
+  let duplicates = 0;
+  let sources = 0;
+  for (const lead of kept) {
+    const draft = draftFromHit({
+      url: lead.url,
+      title: lead.title ?? "",
+      snippet: lead.snippet ?? "",
+      region: lead.region,
+      evidence: lead.evidence,
+      kind: lead.kind,
+      originKey: lead.originKey,
+    });
+    if (!draft) {
+      const match = await findCaseByTitle(userId, lead.title ?? "");
+      if (match) {
+        await addAlert(userId, {
+          caseId: match.id,
+          title: "Mögliche Aktualisierung",
+          body: lead.title || lead.url,
+          source: lead.url,
+          evidence: lead.evidence,
+        });
+        duplicates += 1;
+      } else {
+        await insertLead(userId, {
+          region: lead.region,
+          title: lead.title || lead.url,
+          url: lead.url,
+          snippet: lead.snippet ?? "",
+          evidence: lead.evidence,
+          kind: lead.kind,
+          originKey: lead.originKey,
+          publisher: lead.kind,
+        });
+      }
+      continue;
+    }
+    const source = await rememberCaseSource(userId, draft);
+    if (source.fresh) sources += 1;
+    const duplicate = matchDuplicate(draft, await loadKnown(userId));
+    if (duplicate) {
+      if (duplicate.kind === "case") {
+        await addAlert(userId, {
+          caseId: duplicate.id,
+          title: "Quelle zu bestehendem Fall",
+          body: draft.title,
+          source: draft.sourceUrl,
+          evidence: draft.evidence,
+        });
+        const db = await sql();
+        const present = await db<{ id: string }>`
+          select id from ci_case_items where user_id = ${userId} and case_id = ${duplicate.id} and source_url = ${draft.sourceUrl} limit 1
+        `;
+        if (!present.length) {
+          await addItem(userId, { caseId: duplicate.id, kind: "source", evidence: draft.evidence, body: draft.summary, sourceUrl: draft.sourceUrl });
+        }
+      }
+      await insertCandidate(userId, draft, source.id, "duplicate", duplicate.kind === "case" ? duplicate.id : null);
+      duplicates += 1;
+      continue;
+    }
+    const saved = await insertCandidate(userId, draft, source.id, draft.adoptable ? "candidate" : "needs_review", null);
+    if (!saved.fresh) {
+      duplicates += 1;
+      continue;
+    }
+    if (draft.adoptable) {
+      await adoptDraft(userId, draft, saved.id);
+      adopted += 1;
+    } else {
+      waiting += 1;
+    }
+  }
+  return {
+    note: researchOutcome({ citations: kept.length, adopted, waiting, duplicates }),
+    adopted,
+    waiting,
+    duplicates,
+    sources,
+    dropped,
+  };
+}
+
+export async function listCandidates(userId: string) {
+  const db = await sql();
+  const rows = await db<{
+    id: string;
+    title: string;
+    region: string;
+    city: string;
+    case_type: string;
+    case_status: string;
+    opened_on: string;
+    summary: string;
+    source_ids: string;
+    source_url: string;
+    evidence_class: string;
+    confidence: string;
+    status: string;
+    missing_note: string;
+    case_id: string | null;
+    created_at: unknown;
+    updated_at: unknown;
+  }>`
+    select id, title, region, city, case_type, case_status, opened_on, summary, source_ids, source_url,
+      evidence_class, confidence, status, missing_note, case_id, created_at, updated_at
+    from ci_case_candidates where user_id = ${userId}
+    order by updated_at desc limit 40
+  `;
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    region: row.region,
+    city: row.city,
+    caseType: row.case_type,
+    caseStatus: row.case_status,
+    openedOn: row.opened_on,
+    summary: row.summary,
+    sourceIds: row.source_ids.split(",").map((item) => item.trim()).filter(Boolean),
+    sourceUrl: row.source_url,
+    evidence: row.evidence_class,
+    confidence: row.confidence,
+    status: row.status,
+    missing: row.missing_note,
+    caseId: row.case_id,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+  }));
+}
+
+export async function reviewOpenCandidates(userId: string) {
+  const db = await sql();
+  const rows = await db<{
+    id: string;
+    title: string;
+    region: string;
+    city: string;
+    case_type: string;
+    case_status: string;
+    opened_on: string;
+    summary: string;
+    source_url: string;
+    origin_key: string;
+    evidence_class: string;
+    status: string;
+  }>`
+    select id, title, region, city, case_type, case_status, opened_on, summary, source_url, origin_key, evidence_class, status
+    from ci_case_candidates
+    where user_id = ${userId} and case_id is null and status in ('candidate', 'needs_review')
+    order by created_at asc limit 40
+  `;
+  if (!rows.length) return { note: researchOutcome({ citations: 0, adopted: 0, waiting: 0, duplicates: 0 }), adopted: 0, waiting: 0, duplicates: 0 };
+  let adopted = 0;
+  let waiting = 0;
+  let duplicates = 0;
+  for (const row of rows) {
+    if (!isRegion(row.region) || !isEvidence(row.evidence_class) || !isCaseType(row.case_type) || !isCaseStatus(row.case_status)) {
+      waiting += 1;
+      continue;
+    }
+    const draft: CaseDraft = {
+      title: row.title,
+      region: row.region,
+      city: row.city,
+      caseType: row.case_type,
+      caseStatus: row.case_status,
+      openedOn: row.opened_on,
+      summary: row.summary,
+      sourceUrl: row.source_url,
+      originKey: row.origin_key,
+      evidence: row.evidence_class,
+      kind: "other",
+      confidence: "limited",
+      status: row.status === "needs_review" ? "needs_review" : "candidate",
+      missing: [],
+      adoptable: row.evidence_class === "official" || row.evidence_class === "court" || row.evidence_class === "documented",
+    };
+    if (!draft.adoptable || draft.status === "needs_review") {
+      waiting += 1;
+      continue;
+    }
+    const duplicate = matchDuplicate(draft, (await loadKnown(userId)).filter((item) => item.id !== row.id));
+    if (duplicate) {
+      await db`
+        update ci_case_candidates
+        set status = 'duplicate', case_id = ${duplicate.kind === "case" ? duplicate.id : null}, updated_at = now()
+        where id = ${row.id} and user_id = ${userId}
+      `;
+      duplicates += 1;
+      continue;
+    }
+    await adoptDraft(userId, draft, row.id);
+    adopted += 1;
+  }
+  const note = adopted === 0 && duplicates === 0
+    ? "Keine weiteren Fälle zur Übernahme. Unbelegte Kandidaten bleiben zur Prüfung."
+    : researchOutcome({ citations: rows.length, adopted, waiting, duplicates });
+  return { note, adopted, waiting, duplicates };
+}
+
+export async function decideCandidate(userId: string, id: string, accept: boolean) {
+  const db = await sql();
+  const rows = await db<{
+    id: string;
+    title: string;
+    region: string;
+    city: string;
+    case_type: string;
+    case_status: string;
+    opened_on: string;
+    summary: string;
+    source_url: string;
+    origin_key: string;
+    evidence_class: string;
+    case_id: string | null;
+    status: string;
+  }>`
+    select id, title, region, city, case_type, case_status, opened_on, summary, source_url, origin_key, evidence_class, case_id, status
+    from ci_case_candidates where id = ${id} and user_id = ${userId} limit 1
+  `;
+  const row = rows[0];
+  if (!row) throw new Error("Fallkandidat nicht gefunden.");
+  if (!accept) {
+    await db`update ci_case_candidates set status = 'rejected', updated_at = now() where id = ${id} and user_id = ${userId}`;
+    return { ok: true as const, caseId: row.case_id };
+  }
+  if (row.case_id) return { ok: true as const, caseId: row.case_id };
+  if (!isRegion(row.region) || !isCaseType(row.case_type) || !isCaseStatus(row.case_status) || !isEvidence(row.evidence_class)) {
+    throw new Error("Der Kandidat ist unvollständig.");
+  }
+  const created = await createCase(userId, {
+    title: row.title,
+    region: row.region,
+    stateName: row.region === "de" ? "" : "Baden-Württemberg",
+    city: row.city,
+    caseType: row.case_type,
+    caseStatus: row.case_status,
+    summary: row.summary,
+    openedOn: row.opened_on,
+  });
+  if (row.source_url) {
+    await addItem(userId, { caseId: created.id, kind: "source", evidence: row.evidence_class, body: row.summary || row.title, sourceUrl: row.source_url });
+  }
+  const verified = row.evidence_class === "official" || row.evidence_class === "court" || row.evidence_class === "documented";
+  await db`
+    update ci_case_candidates
+    set case_id = ${created.id}, status = ${verified ? "verified_public" : "needs_review"}, updated_at = now()
+    where id = ${id} and user_id = ${userId}
+  `;
+  return { ok: true as const, caseId: created.id };
+}
+
 export async function listOpenAlerts(userId: string) {
   const db = await sql();
   const rows = await db<{ id: string; case_id: string | null; title: string; body: string; source_label: string; evidence_class: string; created_at: unknown }>`
@@ -647,6 +1030,19 @@ export async function loadBoard(userId: string) {
   const contradictions = await db<{ n: number }>`select count(*)::int as n from ci_case_contradictions where user_id = ${userId} and kind in ('direct', 'possible')`;
   const sources = await db<{ n: number }>`select count(*)::int as n from ci_case_items where user_id = ${userId} and source_url <> ''`;
   const verified = await db<{ n: number }>`select count(*)::int as n from ci_case_items where user_id = ${userId} and evidence_class in ('official', 'court')`;
+  const openCandidates = await db<{ n: number }>`
+    select count(*)::int as n from ci_case_candidates
+    where user_id = ${userId} and case_id is null and status in ('candidate', 'needs_review')
+  `;
+  const adopted = await db<{ n: number }>`
+    select count(*)::int as n from ci_case_candidates
+    where user_id = ${userId} and case_id is not null and status in ('verified_public', 'candidate', 'needs_review')
+  `;
+  const lastResearch = await db<{ result_note: string; finished_at: unknown; region: string }>`
+    select result_note, finished_at, region from ci_desk_jobs
+    where user_id = ${userId} and kind in ('public_cases', 'scan_region') and status = 'done'
+    order by finished_at desc limit 1
+  `;
   const jobs = await db<{ id: string; agent: string; kind: string; region: string; status: string; web: boolean; reason: string; result_note: string; finished_at: unknown }>`
     select id, agent, kind, region, status, web, reason, result_note, finished_at
     from ci_desk_jobs where user_id = ${userId} order by finished_at desc limit 12
@@ -691,6 +1087,11 @@ export async function loadBoard(userId: string) {
     contradictions: Number(contradictions[0]?.n ?? 0),
     sources: Number(sources[0]?.n ?? 0),
     verified: Number(verified[0]?.n ?? 0),
+    candidates: Number(openCandidates[0]?.n ?? 0),
+    adopted: Number(adopted[0]?.n ?? 0),
+    lastResearch: lastResearch[0]
+      ? { result: lastResearch[0].result_note, region: lastResearch[0].region, at: iso(lastResearch[0].finished_at) }
+      : null,
     places: [...places.values()],
     patterns,
     jobs: jobs.map((job) => ({
