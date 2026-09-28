@@ -31,6 +31,7 @@ import {
 } from "@/lib/cases/store";
 import { isCaseStatus } from "@/lib/cases/engine";
 import { isFeatureKey, isOrigin } from "@/lib/cases/discovery";
+import { fileFromCaseMention } from "@/lib/people/store";
 
 function str(value: unknown, max: number) {
   return typeof value === "string" ? value.slice(0, max) : "";
@@ -141,8 +142,9 @@ export const addCasePerson = createServerFn({ method: "POST" })
   })
   .handler(async ({ context, data }) => {
     if (data.name.trim().length < 2) throw new Error("Der Name fehlt.");
-    await addPerson(context.userId, data);
-    return { ok: true as const };
+    const saved = await addPerson(context.userId, data);
+    const filed = await fileFromCaseMention(context.userId, { ...data, mentionId: saved.id });
+    return { ok: true as const, personId: filed.personId, note: filed.note };
   });
 
 export const addCaseHypothesis = createServerFn({ method: "POST" })

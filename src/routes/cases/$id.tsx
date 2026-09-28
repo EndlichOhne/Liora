@@ -238,7 +238,11 @@ function CasePage({ id }: { id: string }) {
             <ul className="mt-3 grid gap-2">
               {file.people.map((person) => (
                 <li key={person.id} className="rounded-lg border border-border bg-card px-4 py-3 text-sm">
-                  <p>{person.name}</p>
+                  {person.personId ? (
+                    <Link to="/people/$id" params={{ id: person.personId }} className="underline">{person.name}</Link>
+                  ) : (
+                    <p>{person.name}</p>
+                  )}
                   <p className="text-muted">{isPersonRole(person.role) ? PERSON_LABEL[person.role] : person.role} · {labelEvidence(person.evidence)}</p>
                   <p className="mt-1 text-muted">{isPersonRole(person.role) ? personLine(person.role) : ""}</p>
                   {person.note ? <p className="mt-1">{person.note}</p> : null}
@@ -449,7 +453,7 @@ function PersonForm({ id, onDone, onError }: { id: string; onDone: () => void; o
       }}
     >
       <Panel>
-        <p className="text-sm text-muted">{personLine(role)}</p>
+        <p className="text-sm text-muted">{personLine(role)} Eine öffentliche https-Quelle legt dazu eine Personenakte zur Prüfung an.</p>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           <Field label="Name aus der Quelle"><input className={inputClass} value={name} onChange={(event) => setName(event.target.value)} required /></Field>
           <Field label="Rolle">

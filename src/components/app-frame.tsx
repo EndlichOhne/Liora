@@ -12,6 +12,7 @@ import {
   Scale,
   Search,
   Settings,
+  Users,
   X,
 } from "lucide-react";
 import { RedirectToSignIn } from "@/lib/auth/gates";
@@ -37,6 +38,7 @@ export function useApp() {
 const NAV = [
   { to: "/", label: "Chat", icon: MessageSquare, exact: true, group: "Arbeit" },
   { to: "/cases", label: "Fälle", icon: Scale, exact: false, group: "Arbeit" },
+  { to: "/people", label: "Personen", icon: Users, exact: false, group: "Arbeit" },
   { to: "/projects", label: "Projekte", icon: FolderKanban, exact: false, group: "Arbeit" },
   { to: "/research", label: "Recherche", icon: Search, exact: false, group: "Arbeit" },
   { to: "/knowledge", label: "Wissen", icon: Library, exact: false, group: "Archiv" },

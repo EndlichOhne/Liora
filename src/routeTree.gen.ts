@@ -17,6 +17,7 @@ import { Route as FilesRouteImport } from './routes/files'
 import { Route as KnowledgeRouteImport } from './routes/knowledge'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as MemoryRouteImport } from './routes/memory'
+import { Route as PeopleRouteImport } from './routes/people'
 import { Route as ProjectsRouteImport } from './routes/projects'
 import { Route as ResearchRouteImport } from './routes/research'
 import { Route as ResetRouteImport } from './routes/reset'
@@ -25,6 +26,7 @@ import { Route as SystemRouteImport } from './routes/system'
 import { Route as ApiChatRouteImport } from './routes/api/chat'
 import { Route as ApiSpeakRouteImport } from './routes/api/speak'
 import { Route as CasesIdRouteImport } from './routes/cases/$id'
+import { Route as PeopleIdRouteImport } from './routes/people/$id'
 import { Route as ProjectsIdRouteImport } from './routes/projects/$id'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 
@@ -68,6 +70,11 @@ const MemoryRoute = MemoryRouteImport.update({
   path: '/memory',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PeopleRoute = PeopleRouteImport.update({
+  id: '/people',
+  path: '/people',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProjectsRoute = ProjectsRouteImport.update({
   id: '/projects',
   path: '/projects',
@@ -108,6 +115,11 @@ const CasesIdRoute = CasesIdRouteImport.update({
   path: '/$id',
   getParentRoute: () => CasesRoute,
 } as any)
+const PeopleIdRoute = PeopleIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => PeopleRoute,
+} as any)
 const ProjectsIdRoute = ProjectsIdRouteImport.update({
   id: '/$id',
   path: '/$id',
@@ -128,6 +140,7 @@ export interface FileRoutesByFullPath {
   '/knowledge': typeof KnowledgeRoute
   '/login': typeof LoginRoute
   '/memory': typeof MemoryRoute
+  '/people': typeof PeopleRouteWithChildren
   '/projects': typeof ProjectsRouteWithChildren
   '/research': typeof ResearchRoute
   '/reset': typeof ResetRoute
@@ -136,6 +149,7 @@ export interface FileRoutesByFullPath {
   '/api/chat': typeof ApiChatRoute
   '/api/speak': typeof ApiSpeakRoute
   '/cases/$id': typeof CasesIdRoute
+  '/people/$id': typeof PeopleIdRoute
   '/projects/$id': typeof ProjectsIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
@@ -148,6 +162,7 @@ export interface FileRoutesByTo {
   '/knowledge': typeof KnowledgeRoute
   '/login': typeof LoginRoute
   '/memory': typeof MemoryRoute
+  '/people': typeof PeopleRouteWithChildren
   '/projects': typeof ProjectsRouteWithChildren
   '/research': typeof ResearchRoute
   '/reset': typeof ResetRoute
@@ -156,6 +171,7 @@ export interface FileRoutesByTo {
   '/api/chat': typeof ApiChatRoute
   '/api/speak': typeof ApiSpeakRoute
   '/cases/$id': typeof CasesIdRoute
+  '/people/$id': typeof PeopleIdRoute
   '/projects/$id': typeof ProjectsIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
@@ -169,6 +185,7 @@ export interface FileRoutesById {
   '/knowledge': typeof KnowledgeRoute
   '/login': typeof LoginRoute
   '/memory': typeof MemoryRoute
+  '/people': typeof PeopleRouteWithChildren
   '/projects': typeof ProjectsRouteWithChildren
   '/research': typeof ResearchRoute
   '/reset': typeof ResetRoute
@@ -177,6 +194,7 @@ export interface FileRoutesById {
   '/api/chat': typeof ApiChatRoute
   '/api/speak': typeof ApiSpeakRoute
   '/cases/$id': typeof CasesIdRoute
+  '/people/$id': typeof PeopleIdRoute
   '/projects/$id': typeof ProjectsIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
@@ -191,6 +209,7 @@ export interface FileRouteTypes {
     | '/knowledge'
     | '/login'
     | '/memory'
+    | '/people'
     | '/projects'
     | '/research'
     | '/reset'
@@ -199,6 +218,7 @@ export interface FileRouteTypes {
     | '/api/chat'
     | '/api/speak'
     | '/cases/$id'
+    | '/people/$id'
     | '/projects/$id'
     | '/api/auth/$'
   fileRoutesByTo: FileRoutesByTo
@@ -211,6 +231,7 @@ export interface FileRouteTypes {
     | '/knowledge'
     | '/login'
     | '/memory'
+    | '/people'
     | '/projects'
     | '/research'
     | '/reset'
@@ -219,6 +240,7 @@ export interface FileRouteTypes {
     | '/api/chat'
     | '/api/speak'
     | '/cases/$id'
+    | '/people/$id'
     | '/projects/$id'
     | '/api/auth/$'
   id:
@@ -231,6 +253,7 @@ export interface FileRouteTypes {
     | '/knowledge'
     | '/login'
     | '/memory'
+    | '/people'
     | '/projects'
     | '/research'
     | '/reset'
@@ -239,6 +262,7 @@ export interface FileRouteTypes {
     | '/api/chat'
     | '/api/speak'
     | '/cases/$id'
+    | '/people/$id'
     | '/projects/$id'
     | '/api/auth/$'
   fileRoutesById: FileRoutesById
@@ -252,6 +276,7 @@ export interface RootRouteChildren {
   KnowledgeRoute: typeof KnowledgeRoute
   LoginRoute: typeof LoginRoute
   MemoryRoute: typeof MemoryRoute
+  PeopleRoute: typeof PeopleRouteWithChildren
   ProjectsRoute: typeof ProjectsRouteWithChildren
   ResearchRoute: typeof ResearchRoute
   ResetRoute: typeof ResetRoute
@@ -320,6 +345,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MemoryRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/people': {
+      id: '/people'
+      path: '/people'
+      fullPath: '/people'
+      preLoaderRoute: typeof PeopleRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/projects': {
       id: '/projects'
       path: '/projects'
@@ -376,6 +408,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CasesIdRouteImport
       parentRoute: typeof CasesRoute
     }
+    '/people/$id': {
+      id: '/people/$id'
+      path: '/$id'
+      fullPath: '/people/$id'
+      preLoaderRoute: typeof PeopleIdRouteImport
+      parentRoute: typeof PeopleRoute
+    }
     '/projects/$id': {
       id: '/projects/$id'
       path: '/$id'
@@ -403,6 +442,17 @@ const CasesRouteChildren: CasesRouteChildren = {
 
 const CasesRouteWithChildren = CasesRoute._addFileChildren(CasesRouteChildren)
 
+interface PeopleRouteChildren {
+  PeopleIdRoute: typeof PeopleIdRoute
+}
+
+const PeopleRouteChildren: PeopleRouteChildren = {
+  PeopleIdRoute: PeopleIdRoute,
+}
+
+const PeopleRouteWithChildren =
+  PeopleRoute._addFileChildren(PeopleRouteChildren)
+
 interface ProjectsRouteChildren {
   ProjectsIdRoute: typeof ProjectsIdRoute
 }
@@ -424,6 +474,7 @@ const rootRouteChildren: RootRouteChildren = {
   KnowledgeRoute: KnowledgeRoute,
   LoginRoute: LoginRoute,
   MemoryRoute: MemoryRoute,
+  PeopleRoute: PeopleRouteWithChildren,
   ProjectsRoute: ProjectsRouteWithChildren,
   ResearchRoute: ResearchRoute,
   ResetRoute: ResetRoute,

@@ -285,6 +285,7 @@ export async function getCaseFile(userId: string, id: string) {
       evidence: text(person.evidence_class),
       note: text(person.note),
       sourceUrl: text(person.source_url),
+      personId: text(person.person_id),
     })),
     hypotheses: hypotheses.map((item) => ({
       id: text(item.id),
@@ -394,13 +395,15 @@ export async function addPerson(userId: string, input: { caseId: string; name: s
   const blocked = allowPerson(input.role, input.evidence) ?? rejectAsFact(input.note, input.evidence);
   if (blocked) throw new Error(blocked);
   const db = await sql();
+  const id = crypto.randomUUID();
   await db`
     insert into ci_case_people (id, user_id, case_id, name, role, evidence_class, note, source_url)
     values (
-      ${crypto.randomUUID()}, ${userId}, ${input.caseId}, ${input.name.slice(0, 140)}, ${input.role}, ${input.evidence},
+      ${id}, ${userId}, ${input.caseId}, ${input.name.slice(0, 140)}, ${input.role}, ${input.evidence},
       ${input.note.slice(0, 1000)}, ${input.sourceUrl.slice(0, 500)}
     )
   `;
+  return { id };
 }
 
 export async function addHypothesis(userId: string, input: { caseId: string; title: string; support: string; contradict: string; unknown: string; alternatives: string }) {
