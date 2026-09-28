@@ -175,7 +175,6 @@ test("legacy png + site.json type still needs the X feed card", () => {
 });
 
 test("siteDeclaresOgTypeGame reads the site contract", () => {
-  const root = makeWorkspace({});
   assert.equal(siteDeclaresOgTypeGame({ type: "x:game" }), true);
   assert.equal(siteDeclaresOgTypeGame({ type: "website" }), false);
   assert.equal(siteDeclaresOgTypeGame({}), false);
