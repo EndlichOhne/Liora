@@ -6,6 +6,7 @@ import { contentHash, safePublicUrl } from "@/lib/cases/engine";
 import { rejectDiscoveryClaim } from "@/lib/cases/discovery";
 import { normalizeName, personResearchRequest } from "@/lib/people/rules";
 import { noteSourceMentions } from "@/lib/people/store";
+import { loadContext, resolveOwnedCase } from "@/lib/intelligence/core-store";
 import { redactError } from "@/lib/security/check";
 import {
   buildPlan,
@@ -335,7 +336,12 @@ export async function startResearchTask(
   const request = input.request.trim().slice(0, 2000);
   if (request.length < 8) throw new Error("Die Anfrage ist zu kurz.");
   if (rejectDiscoveryClaim(request) || findSecret(request)) throw new Error("Diese Anfrage wird nicht ausgeführt.");
-  const caseId = (input.caseId ?? "").trim().slice(0, 80);
+  let caseId = (input.caseId ?? "").trim().slice(0, 80);
+  if (!caseId && isFollowUp(request)) {
+    const ctx = await loadContext(userId);
+    const resolved = ctx.activeCase ? await resolveOwnedCase(userId, ctx.activeCase) : null;
+    if (resolved) caseId = resolved;
+  }
   if (caseId) {
     const file = await getCaseFile(userId, caseId);
     if (!file) throw new Error("Akte nicht gefunden.");

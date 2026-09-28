@@ -16,6 +16,7 @@ import {
   runBenchmarks,
   type ExistingFact,
 } from "@/lib/intelligence/engine";
+import { rememberContext } from "@/lib/intelligence/core-store";
 import type {
   ClaimDTO,
   CycleDTO,
@@ -770,6 +771,7 @@ export async function loadPromptContext(userId: string): Promise<{ rules: string
 }
 
 export async function onUserMessage(userId: string, text: string, priorAnswer: string): Promise<string | null> {
+  await rememberContext(userId, text).catch(() => undefined);
   const hit = parseFeedback(text);
   if (!hit) {
     const decision = routeTask(text);

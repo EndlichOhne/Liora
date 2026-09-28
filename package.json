@@ -16,7 +16,7 @@
     "preview:stop": "node scripts/preview.mjs stop",
     "typecheck": "tsc --noEmit",
     "check:auth": "node scripts/check-auth-invariant.mjs",
-    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/intelligence/engine.test.ts src/lib/cases/engine.test.ts src/lib/cases/discovery.test.ts src/lib/cases/derive.test.ts src/lib/cases/intake.test.ts src/lib/research/engine.test.ts src/lib/people/rules.test.ts src/lib/security/check.test.ts",
+    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/intelligence/engine.test.ts src/lib/cases/engine.test.ts src/lib/cases/discovery.test.ts src/lib/cases/derive.test.ts src/lib/cases/intake.test.ts src/lib/research/engine.test.ts src/lib/people/rules.test.ts src/lib/intelligence/core.test.ts src/lib/security/check.test.ts",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

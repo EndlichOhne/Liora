@@ -13,6 +13,7 @@ import {
   Search,
   Settings,
   Users,
+  Workflow,
   X,
 } from "lucide-react";
 import { RedirectToSignIn } from "@/lib/auth/gates";
@@ -41,6 +42,7 @@ const NAV = [
   { to: "/people", label: "Personen", icon: Users, exact: false, group: "Arbeit" },
   { to: "/projects", label: "Projekte", icon: FolderKanban, exact: false, group: "Arbeit" },
   { to: "/research", label: "Recherche", icon: Search, exact: false, group: "Arbeit" },
+  { to: "/intelligence", label: "Intelligence", icon: Workflow, exact: false, group: "Arbeit" },
   { to: "/knowledge", label: "Wissen", icon: Library, exact: false, group: "Archiv" },
   { to: "/memory", label: "Erinnerung", icon: Brain, exact: false, group: "Archiv" },
   { to: "/files", label: "Dateien", icon: Files, exact: false, group: "Archiv" },

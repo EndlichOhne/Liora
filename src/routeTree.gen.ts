@@ -14,6 +14,7 @@ import { Route as ActivityRouteImport } from './routes/activity'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as CasesRouteImport } from './routes/cases'
 import { Route as FilesRouteImport } from './routes/files'
+import { Route as IntelligenceRouteImport } from './routes/intelligence'
 import { Route as KnowledgeRouteImport } from './routes/knowledge'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as MemoryRouteImport } from './routes/memory'
@@ -54,6 +55,11 @@ const CasesRoute = CasesRouteImport.update({
 const FilesRoute = FilesRouteImport.update({
   id: '/files',
   path: '/files',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IntelligenceRoute = IntelligenceRouteImport.update({
+  id: '/intelligence',
+  path: '/intelligence',
   getParentRoute: () => rootRouteImport,
 } as any)
 const KnowledgeRoute = KnowledgeRouteImport.update({
@@ -143,6 +149,7 @@ export interface FileRoutesByFullPath {
   '/agents': typeof AgentsRoute
   '/cases': typeof CasesRouteWithChildren
   '/files': typeof FilesRoute
+  '/intelligence': typeof IntelligenceRoute
   '/knowledge': typeof KnowledgeRoute
   '/login': typeof LoginRoute
   '/memory': typeof MemoryRoute
@@ -166,6 +173,7 @@ export interface FileRoutesByTo {
   '/agents': typeof AgentsRoute
   '/cases': typeof CasesRouteWithChildren
   '/files': typeof FilesRoute
+  '/intelligence': typeof IntelligenceRoute
   '/knowledge': typeof KnowledgeRoute
   '/login': typeof LoginRoute
   '/memory': typeof MemoryRoute
@@ -190,6 +198,7 @@ export interface FileRoutesById {
   '/agents': typeof AgentsRoute
   '/cases': typeof CasesRouteWithChildren
   '/files': typeof FilesRoute
+  '/intelligence': typeof IntelligenceRoute
   '/knowledge': typeof KnowledgeRoute
   '/login': typeof LoginRoute
   '/memory': typeof MemoryRoute
@@ -215,6 +224,7 @@ export interface FileRouteTypes {
     | '/agents'
     | '/cases'
     | '/files'
+    | '/intelligence'
     | '/knowledge'
     | '/login'
     | '/memory'
@@ -238,6 +248,7 @@ export interface FileRouteTypes {
     | '/agents'
     | '/cases'
     | '/files'
+    | '/intelligence'
     | '/knowledge'
     | '/login'
     | '/memory'
@@ -261,6 +272,7 @@ export interface FileRouteTypes {
     | '/agents'
     | '/cases'
     | '/files'
+    | '/intelligence'
     | '/knowledge'
     | '/login'
     | '/memory'
@@ -285,6 +297,7 @@ export interface RootRouteChildren {
   AgentsRoute: typeof AgentsRoute
   CasesRoute: typeof CasesRouteWithChildren
   FilesRoute: typeof FilesRoute
+  IntelligenceRoute: typeof IntelligenceRoute
   KnowledgeRoute: typeof KnowledgeRoute
   LoginRoute: typeof LoginRoute
   MemoryRoute: typeof MemoryRoute
@@ -334,6 +347,13 @@ declare module '@tanstack/react-router' {
       path: '/files'
       fullPath: '/files'
       preLoaderRoute: typeof FilesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/intelligence': {
+      id: '/intelligence'
+      path: '/intelligence'
+      fullPath: '/intelligence'
+      preLoaderRoute: typeof IntelligenceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/knowledge': {
@@ -502,6 +522,7 @@ const rootRouteChildren: RootRouteChildren = {
   AgentsRoute: AgentsRoute,
   CasesRoute: CasesRouteWithChildren,
   FilesRoute: FilesRoute,
+  IntelligenceRoute: IntelligenceRoute,
   KnowledgeRoute: KnowledgeRoute,
   LoginRoute: LoginRoute,
   MemoryRoute: MemoryRoute,
