@@ -250,9 +250,19 @@ export function safePublicUrl(raw: string): string | null {
   try {
     const url = new URL(raw.trim());
     if (url.protocol !== "https:") return null;
-    const host = url.hostname.toLowerCase();
-    if (host === "localhost" || host.endsWith(".local") || host.endsWith(".internal")) return null;
-    if (/^(127\.|10\.|192\.168\.|169\.254\.|0\.0\.0\.0|\[::1\])/.test(host)) return null;
+    const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal") || host === "metadata.google.internal") return null;
+    const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (ipv4) {
+      const parts = ipv4.slice(1).map(Number);
+      if (parts.some((part) => part > 255)) return null;
+      const [a, b] = parts;
+      if (a === 0 || a === 10 || a === 127) return null;
+      if (a === 169 && b === 254) return null;
+      if (a === 192 && b === 168) return null;
+      if (a === 172 && b >= 16 && b <= 31) return null;
+    }
+    if (host === "::1" || host === "0.0.0.0") return null;
     return url.toString();
   } catch {
     return null;

@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { AppFrame, PageBody, PageHead } from "@/components/app-frame";
 import { Button, Empty, Panel, TextArea, inputClass } from "@/components/ui";
 import { formatWhen, hostOf } from "@/lib/domain";
 import { loadClaims, loadSources } from "@/lib/intelligence/functions";
 import type { ClaimDTO, SourceDTO } from "@/lib/intelligence/types";
 import { loadResearch, loadResearchTasks, startResearch } from "@/lib/research/functions";
+import { loadSourceNetwork } from "@/lib/people/functions";
+import { LINK_NOTE } from "@/lib/people/rules";
 
 export const Route = createFileRoute("/research")({ component: ResearchRoute });
 
@@ -32,13 +34,15 @@ function ResearchPage() {
   const [sources, setSources] = useState<SourceDTO[]>([]);
   const [claims, setClaims] = useState<ClaimDTO[]>([]);
   const [query, setQuery] = useState("");
+  const [network, setNetwork] = useState<Awaited<ReturnType<typeof loadSourceNetwork>>>({});
 
   function loadLibrary() {
-    void Promise.all([loadSources(), loadClaims(), loadResearchTasks()])
-      .then(([nextSources, nextClaims, tasks]) => {
+    void Promise.all([loadSources(), loadClaims(), loadResearchTasks(), loadSourceNetwork()])
+      .then(([nextSources, nextClaims, tasks, links]) => {
         setSources(nextSources);
         setClaims(nextClaims);
         setHistory(tasks);
+        setNetwork(links);
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : "Recherche konnte nicht geladen werden."));
   }
@@ -119,7 +123,7 @@ function ResearchPage() {
             <Empty title="Noch keine Quelle" body="Eine Recherche mit Websuche speichert nur zurückgegebene Quellen. Ohne Treffer bleibt die Liste leer." />
           ) : null}
           {visible.map((source) => (
-            <SourceCard key={source.id} source={source} />
+            <SourceCard key={source.id} source={source} links={network[source.id]} />
           ))}
         </div>
         {claims.length ? (
@@ -235,19 +239,32 @@ function TaskDetail({ file }: { file: TaskFile }) {
   );
 }
 
-function SourceCard({ source }: { source: SourceDTO }) {
+function SourceCard({ source, links }: { source: SourceDTO; links?: { people: { id: string; name: string }[]; cases: { id: string; title: string }[] } }) {
   const title = source.title || hostOf(source.url) || "Ohne Titel";
   const inner = (
     <>
       <p className="font-medium">{title}</p>
       <p className="mt-1 text-xs text-muted">{source.url ? hostOf(source.url) : "Keine Website"}</p>
       {source.note ? <p className="mt-3 line-clamp-3 text-sm text-muted">{source.note}</p> : null}
+      {links && (links.people.length || links.cases.length) ? (
+        <div className="mt-3 text-sm">
+          <p className="text-xs text-muted">{LINK_NOTE}</p>
+          {links.people.length ? <p className="mt-1">Verbundene Personen</p> : null}
+          <ul>
+            {links.people.map((person) => (
+              <li key={person.id}><Link to="/people/$id" params={{ id: person.id }} className="underline">{person.name}</Link></li>
+            ))}
+          </ul>
+          {links.cases.length ? <p className="mt-1">Verbundene Fälle</p> : null}
+          <ul>
+            {links.cases.map((item) => (
+              <li key={item.id}><Link to="/cases/$id" params={{ id: item.id }} className="underline">{item.title}</Link></li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </>
   );
   if (!source.url) return <article className="rounded-lg border border-border bg-card p-4">{inner}</article>;
-  return (
-    <a href={source.url} target="_blank" rel="noreferrer" className="block rounded-lg border border-border bg-card p-4 transition-colors duration-150 hover:bg-subtle">
-      {inner}
-    </a>
-  );
+  return <article className="rounded-lg border border-border bg-card p-4">{inner}{source.url ? <a className="mt-3 inline-flex min-h-11 items-center text-sm underline" href={source.url} target="_blank" rel="noreferrer">Quelle öffnen</a> : null}</article>;
 }

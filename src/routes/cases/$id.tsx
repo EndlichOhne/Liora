@@ -35,6 +35,7 @@ import {
 } from "@/lib/cases/functions";
 import { formatWhen } from "@/lib/domain";
 import { loadResearch, startResearch } from "@/lib/research/functions";
+import { RELATION_LABEL, isCaseRelation } from "@/lib/people/rules";
 
 export const Route = createFileRoute("/cases/$id")({ component: CaseRoute });
 
@@ -244,6 +245,7 @@ function CasePage({ id }: { id: string }) {
                     <p>{person.name}</p>
                   )}
                   <p className="text-muted">{isPersonRole(person.role) ? PERSON_LABEL[person.role] : person.role} · {labelEvidence(person.evidence)}</p>
+                  {person.relation && isCaseRelation(person.relation) ? <p className="mt-1 text-muted">{person.relation} · {RELATION_LABEL[person.relation]}</p> : null}
                   <p className="mt-1 text-muted">{isPersonRole(person.role) ? personLine(person.role) : ""}</p>
                   {person.note ? <p className="mt-1">{person.note}</p> : null}
                   {person.sourceUrl ? <a className="mt-1 block truncate underline" href={person.sourceUrl} target="_blank" rel="noreferrer">{person.sourceUrl}</a> : null}

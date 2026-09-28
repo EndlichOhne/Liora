@@ -57,6 +57,43 @@ function iso(value: unknown): string {
   return value ? new Date(String(value)).toISOString() : "";
 }
 
+function mergeCasePeople(mentions: Record<string, unknown>[], links: Record<string, unknown>[]) {
+  const mapped = mentions.map((person) => ({
+    id: text(person.id),
+    name: text(person.name),
+    role: text(person.role),
+    evidence: text(person.evidence_class),
+    note: text(person.note),
+    sourceUrl: text(person.source_url),
+    personId: text(person.person_id),
+    relation: "",
+  }));
+  const seen = new Set(mapped.map((person) => person.personId).filter(Boolean));
+  for (const row of links) {
+    const personId = text(row.person_id);
+    const relation = text(row.relation);
+    const hit = mapped.find((person) => person.personId && person.personId === personId);
+    if (hit) {
+      hit.relation = relation || hit.relation;
+      if (!hit.sourceUrl) hit.sourceUrl = text(row.source_url);
+      continue;
+    }
+    if (seen.has(personId)) continue;
+    seen.add(personId);
+    mapped.push({
+      id: text(row.id),
+      name: text(row.display_name),
+      role: text(row.role),
+      evidence: text(row.evidence_class),
+      note: "",
+      sourceUrl: text(row.source_url),
+      personId,
+      relation,
+    });
+  }
+  return mapped;
+}
+
 async function sql() {
   return getSql();
 }
@@ -232,7 +269,7 @@ export async function getCaseFile(userId: string, id: string) {
   const cases = await db<Record<string, unknown>>`select * from ci_cases where id = ${id} and user_id = ${userId} limit 1`;
   const row = cases[0];
   if (!row) return null;
-  const [events, items, people, hypotheses, contradictions, edges, alerts] = await Promise.all([
+  const [events, items, people, hypotheses, contradictions, edges, alerts, links] = await Promise.all([
     db<Record<string, unknown>>`select * from ci_case_events where case_id = ${id} and user_id = ${userId} order by occurred_on, created_at`,
     db<Record<string, unknown>>`select * from ci_case_items where case_id = ${id} and user_id = ${userId} order by created_at`,
     db<Record<string, unknown>>`select * from ci_case_people where case_id = ${id} and user_id = ${userId} order by created_at`,
@@ -240,6 +277,13 @@ export async function getCaseFile(userId: string, id: string) {
     db<Record<string, unknown>>`select * from ci_case_contradictions where case_id = ${id} and user_id = ${userId} order by created_at`,
     db<Record<string, unknown>>`select * from ci_case_edges where case_id = ${id} and user_id = ${userId} order by created_at`,
     db<Record<string, unknown>>`select * from ci_case_alerts where case_id = ${id} and user_id = ${userId} order by created_at desc limit 20`,
+    db<Record<string, unknown>>`
+      select pc.id, pc.person_id, pc.relation, pc.evidence_class, p.display_name, p.role, coalesce(s.url, '') as source_url
+      from ci_person_cases pc
+      join ci_persons p on p.id = pc.person_id and p.user_id = pc.user_id
+      left join ci_sources s on s.id = pc.source_id and s.user_id = pc.user_id
+      where pc.case_id = ${id} and pc.user_id = ${userId}
+    `,
   ]);
   return {
     case: {
@@ -278,15 +322,7 @@ export async function getCaseFile(userId: string, id: string) {
       sourceUrl: text(item.source_url),
       historical: flag(item.historical),
     })),
-    people: people.map((person) => ({
-      id: text(person.id),
-      name: text(person.name),
-      role: text(person.role),
-      evidence: text(person.evidence_class),
-      note: text(person.note),
-      sourceUrl: text(person.source_url),
-      personId: text(person.person_id),
-    })),
+    people: mergeCasePeople(people, links),
     hypotheses: hypotheses.map((item) => ({
       id: text(item.id),
       title: text(item.title),

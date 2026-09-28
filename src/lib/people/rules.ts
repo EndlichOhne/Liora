@@ -1,4 +1,5 @@
-import { foldTitle } from "../cases/intake.ts";
+import { foldTitle, dateFromText } from "../cases/intake.ts";
+import { jaccard } from "../intelligence/engine.ts";
 import {
   isEvidence,
   isRegion,
@@ -24,7 +25,7 @@ export const PEOPLE_ROLES = [
 ] as const;
 export type PeopleRole = (typeof PEOPLE_ROLES)[number];
 
-export const PEOPLE_STATUSES = ["needs_review", "verified_public"] as const;
+export const PEOPLE_STATUSES = ["needs_review", "partially_verified", "verified_public", "outdated", "conflicting"] as const;
 export type PeopleStatus = (typeof PEOPLE_STATUSES)[number];
 
 export const CASE_RELATIONS = [
@@ -53,7 +54,10 @@ export const ROLE_LABEL: Record<PeopleRole, string> = {
 
 export const PEOPLE_STATUS_LABEL: Record<PeopleStatus, string> = {
   needs_review: "Zur Prüfung",
+  partially_verified: "Teilweise belegt",
   verified_public: "Öffentlich belegt",
+  outdated: "Veraltet markiert",
+  conflicting: "Widerspruch",
 };
 
 export const RELATION_LABEL: Record<CaseRelation, string> = {
@@ -77,6 +81,12 @@ export const NOT_SIGNED_IN = "Nicht angemeldet.";
 export const NOT_DOCUMENTED = "Unbelegte oder nur behauptete Angaben werden nicht als Personenrolle gespeichert.";
 export const NOT_VERIFIED = "Noch nicht ausreichend belegt. Ein Medienbericht wird nicht zur öffentlichen Feststellung.";
 export const SAME_NAME = "Gleicher Name, keine zusätzlichen übereinstimmenden Merkmale. Nicht zusammengeführt.";
+export const POSSIBLE_DUPLICATE = "Mögliche Dublette. Nicht zusammengeführt. Menschliche Prüfung nötig.";
+export const NONE_PEOPLE = "Keine Personen gefunden.";
+export const LINK_NOTE = "Diese Information ist in den geprüften Daten miteinander verknüpft.";
+export const CONFLICT_NOTE = "Die Quellen widersprechen sich. Es wird keine Angabe ausgewählt.";
+export const PRIVATE_DATA = "Private Adressen, Telefonnummern und private Kontaktdaten werden nicht gespeichert.";
+export const VERIFIED_MEANS = "Öffentlich belegt heißt nur: die Angabe ist durch geprüfte öffentliche Quellen dokumentiert. Das ist keine Schuldfeststellung.";
 export const WEAK_CLASS = "Eine Hypothese oder eine leere Klasse trägt keine Personenrolle.";
 
 const JUDGMENT =
@@ -190,7 +200,7 @@ export function draftPerson(
   if (!isPeopleRole(input.role)) return { ok: false, error: "Diese Rolle wird nicht geführt." };
   if (!isEvidence(input.evidence)) return { ok: false, error: "Unbekannte Evidenzklasse." };
   if (!isSourceRelation(input.sourceRelation)) return { ok: false, error: "Diese Quellenbeziehung wird nicht geführt." };
-  const banned = judgment(`${displayName} ${input.aliases.join(" ")} ${input.summary}`) ?? rejectAsFact(input.summary, input.evidence);
+  const banned = judgment(`${displayName} ${input.aliases.join(" ")} ${input.summary}`) ?? rejectAsFact(input.summary, input.evidence) ?? rejectPrivate(`${displayName} ${input.aliases.join(" ")} ${input.summary} ${input.nationality ?? ""}`);
   if (banned) return { ok: false, error: banned };
   const roleBlock = classForRole(input.role, input.evidence);
   if (roleBlock) return { ok: false, error: roleBlock };
@@ -340,3 +350,150 @@ export function reviewPerson(
   if (!enough) return { ok: true, status: "needs_review", note: NOT_VERIFIED };
   return { ok: true, status: "verified_public", note: "Quellen geprüft. Die Belegklasse bleibt unverändert." };
 }
+
+const PRIVATE = /(?:[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})|(?:\+?\d[\d\s().-]{7,}\d)|(?:\b(?:telefon|handy|mobilnummer|privatadresse|wohnanschrift)\b)/i;
+
+export function rejectPrivate(text: string): string | null {
+  return PRIVATE.test(text) ? PRIVATE_DATA : null;
+}
+
+export function caseCountPhrase(count: number): string {
+  if (!Number.isInteger(count) || count < 0) return NONE_PEOPLE;
+  if (count === 0) return "Keine öffentlich dokumentierte Fallbeziehung.";
+  return `${count} öffentlich dokumentierte Fallbeziehungen`;
+}
+
+export function pageWindow(page: number, size = 40): { page: number; limit: number; offset: number } {
+  const limit = Math.min(40, Math.max(1, Math.trunc(size) || 40));
+  const current = Number.isInteger(page) && page > 0 ? page : 1;
+  return { page: current, limit, offset: (current - 1) * limit };
+}
+
+export function confidenceFor(evidence: EvidenceClass): "low" | "limited" | "notable" {
+  if (evidence === "official" || evidence === "court") return "notable";
+  if (evidence === "documented") return "limited";
+  return "low";
+}
+
+export function timelineEvent(input: {
+  label: string;
+  detail: string;
+  occurredOn: string;
+  evidence: string;
+  sourceId: string;
+  caseId?: string;
+}): { ok: true; event: { occurredOn: string; label: string; detail: string; evidence: EvidenceClass; sourceId: string; caseId: string; confidence: "low" | "limited" | "notable"; missingDate: boolean } } | { ok: false; error: string } {
+  if (!input.sourceId.trim()) return { ok: false, error: RELATION_NEEDS_SOURCE };
+  if (!isEvidence(input.evidence)) return { ok: false, error: "Unbekannte Evidenzklasse." };
+  const label = input.label.replace(/\s+/g, " ").trim();
+  if (label.length < 2) return { ok: false, error: "Das Ereignis braucht eine Bezeichnung." };
+  const raw = input.occurredOn.trim();
+  const occurredOn = raw ? dateFromText(raw) || (/^\d{4}$/.test(raw) ? raw : "") : "";
+  if (raw && !occurredOn) return { ok: false, error: "Datum ist nicht belegt." };
+  return {
+    ok: true,
+    event: {
+      occurredOn,
+      label: label.slice(0, 180),
+      detail: input.detail.replace(/\s+/g, " ").trim().slice(0, 1000),
+      evidence: input.evidence,
+      sourceId: input.sourceId.trim(),
+      caseId: (input.caseId ?? "").trim(),
+      confidence: confidenceFor(input.evidence),
+      missingDate: !occurredOn,
+    },
+  };
+}
+
+export function conflictingClaims(claims: { field: string; value: string; sourceId: string }[]): { field: string; left: string; right: string; leftSourceId: string; rightSourceId: string }[] {
+  const groups = new Map<string, { field: string; value: string; sourceId: string }[]>();
+  for (const claim of claims) {
+    const list = groups.get(claim.field) ?? [];
+    list.push(claim);
+    groups.set(claim.field, list);
+  }
+  const conflicts = [];
+  for (const [field, list] of groups) {
+    const distinct: { field: string; value: string; sourceId: string }[] = [];
+    for (const claim of list) {
+      if (!distinct.some((item) => item.value === claim.value)) distinct.push(claim);
+    }
+    if (distinct.length < 2) continue;
+    conflicts.push({
+      field,
+      left: distinct[0].value,
+      right: distinct[1].value,
+      leftSourceId: distinct[0].sourceId,
+      rightSourceId: distinct[1].sourceId,
+    });
+  }
+  return conflicts;
+}
+
+export function agreedValue(claims: { value: string }[]): string | null {
+  const values = [...new Set(claims.map((claim) => claim.value).filter(Boolean))];
+  return values.length === 1 ? values[0] : null;
+}
+
+function nameBase(value: string): string {
+  return normalizeName(value).replace(/\b(jr|junior|sr|senior)\b/g, "").replace(/\s+/g, " ").trim();
+}
+
+export function duplicateScan(
+  actorId: string,
+  incoming: { userId: string; displayName: string; birthYear: number | null; nationality: string | null; region: string | null; sourceUrl: string },
+  known: KnownPerson[],
+): { kind: "merge"; id: string; reason: string } | { kind: "possible"; id: string; reason: string } | { kind: "none" } {
+  const merge = findMerge(actorId, incoming, known);
+  if (merge) return { kind: "merge", ...merge };
+  if (!actorId || incoming.userId !== actorId) return { kind: "none" };
+  const name = normalizeName(incoming.displayName);
+  const base = nameBase(incoming.displayName);
+  for (const row of known) {
+    if (row.userId !== actorId) continue;
+    const other = row.normalizedName || normalizeName(row.displayName);
+    if (!other) continue;
+    if (other === name) return { kind: "possible", id: row.id, reason: SAME_NAME };
+    if (nameBase(row.displayName) === base && base.length > 0) return { kind: "possible", id: row.id, reason: POSSIBLE_DUPLICATE };
+    if (jaccard(incoming.displayName, row.displayName) >= 0.6) return { kind: "possible", id: row.id, reason: POSSIBLE_DUPLICATE };
+  }
+  return { kind: "none" };
+}
+
+export function personResearchRequest(text: string): string | null {
+  const match = text.trim().match(/^(?:recherchiere|untersuche)\s+person\s+(.{2,140})$/i);
+  if (!match) return null;
+  const name = match[1].replace(/\s+/g, " ").trim();
+  return name.length >= 2 ? name : null;
+}
+
+export function linkedChain(input: { personId: string; caseId: string; sourceId: string }): boolean {
+  return Boolean(input.personId.trim() && input.caseId.trim() && input.sourceId.trim());
+}
+
+export function accessDecision(actorId: string, ownerId: string | null): "allow" | "not_found" {
+  if (!actorId || !ownerId || actorId !== ownerId) return "not_found";
+  return "allow";
+}
+
+export function decideVerification(input: {
+  actorId: string;
+  personOwnerId: string;
+  sources: { evidence: EvidenceClass; ownerId: string }[];
+  conflicts: number;
+  outdated: boolean;
+}): { ok: true; status: PeopleStatus; note: string } | { ok: false; error: string } {
+  if (input.outdated) {
+    if (!input.actorId || input.personOwnerId !== input.actorId) return { ok: false, error: OTHER_ACCOUNT };
+    return { ok: true, status: "outdated", note: "Als veraltet markiert. Die Quellen bleiben unverändert." };
+  }
+  const reviewed = reviewPerson(input.actorId, input.personOwnerId, input.sources);
+  if (!reviewed.ok) return reviewed;
+  if (input.conflicts > 0) return { ok: true, status: "conflicting", note: CONFLICT_NOTE };
+  const strong = input.sources.some((source) => STRONG.has(source.evidence));
+  const media = input.sources.some((source) => source.evidence === "reported");
+  if (strong && media) return { ok: true, status: "partially_verified", note: "Ein Teil ist behördlich oder dokumentiert. Medienberichte bleiben Medienberichte." };
+  if (reviewed.status === "verified_public") return { ...reviewed, note: `${reviewed.note} ${VERIFIED_MEANS}` };
+  return reviewed;
+}
+

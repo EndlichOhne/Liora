@@ -8,6 +8,7 @@ import {
   createPerson,
   getPersonFile,
   listPeople,
+  listSourceNetwork,
   markPersonReviewed,
 } from "@/lib/people/store";
 
@@ -45,7 +46,14 @@ export const loadPeople = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .validator((input: unknown) => {
     const data = record(input);
-    return { query: str(data.query, 120), role: str(data.role, 40), region: str(data.region, 40), status: str(data.status, 40) };
+    return {
+      query: str(data.query, 120),
+      role: str(data.role, 40),
+      region: str(data.region, 40),
+      status: str(data.status, 40),
+      filter: str(data.filter, 40),
+      page: Number(data.page) || 1,
+    };
   })
   .handler(async ({ context, data }) => listPeople(context.userId, data));
 
@@ -103,6 +111,13 @@ export const addPersonCase = createServerFn({ method: "POST" })
 
 export const reviewPersonFile = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((input: unknown) => ({ id: str(record(input).id, 80) }))
-  .handler(async ({ context, data }) => markPersonReviewed(context.userId, data.id));
+  .validator((input: unknown) => {
+    const data = record(input);
+    return { id: str(data.id, 80), outdated: data.outdated === true };
+  })
+  .handler(async ({ context, data }) => markPersonReviewed(context.userId, data.id, data.outdated));
+
+export const loadSourceNetwork = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => listSourceNetwork(context.userId));
 

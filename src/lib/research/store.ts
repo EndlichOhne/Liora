@@ -4,6 +4,8 @@ import { classifySource, findSecret } from "@/lib/intelligence/engine";
 import { compareStored, getCaseFile } from "@/lib/cases/store";
 import { contentHash, safePublicUrl } from "@/lib/cases/engine";
 import { rejectDiscoveryClaim } from "@/lib/cases/discovery";
+import { normalizeName, personResearchRequest } from "@/lib/people/rules";
+import { noteSourceMentions } from "@/lib/people/store";
 import {
   buildPlan,
   scopeFor,
@@ -390,6 +392,22 @@ export async function startResearchTask(
     `;
   }
   let summary = "Nur die Anfrage und der gespeicherte Bestand. Nichts erfunden.";
+  let personNote = "";
+  const askedName = personResearchRequest(request);
+  if (askedName) {
+    const found = await db<{ display_name: string }>`
+      select display_name from ci_persons
+      where user_id = ${userId} and normalized_name = ${normalizeName(askedName)}
+      limit 5
+    `;
+    personNote = found.length
+      ? `Bestehende Person: ${found.map((row) => row.display_name).join(", ")}. Keine neue Person aus der Anfrage.`
+      : "Keine gespeicherte Person zu diesem Namen. Aus der Anfrage wird keine Person angelegt.";
+    await db`
+      insert into ci_research_steps (id, user_id, task_id, position, name, note, status)
+      values (${crypto.randomUUID()}, ${userId}, ${id}, ${plan.length}, 'Person', ${personNote}, 'done')
+    `;
+  }
   let decision: "NO NEW DATA" | "neu bewertet" = "neu bewertet";
   try {
     if (input.web === true) {
@@ -405,6 +423,10 @@ export async function startResearchTask(
         `;
         void source;
       }
+      const titled = await db<{ id: string; title: string; note: string }>`
+        select id, title, note from ci_sources where user_id = ${userId} and task_id = ${id}
+      `;
+      for (const row of titled) await noteSourceMentions(userId, row.id, `${row.title} ${row.note}`);
       summary = run.outputs.map((item) => item.summary).join(" ").slice(0, 800) || summary;
     } else {
       summary = "Websuche nicht freigegeben. Nur gespeicherte Akte ausgewertet.";
@@ -426,6 +448,7 @@ export async function startResearchTask(
       time: /uhrzeit|wann|uhr\b/i.test(request) || elements.some((item) => item.kind === "time"),
     };
     await syncQuestions(userId, id, caseId, asked);
+    if (personNote) summary = `${summary} ${personNote}`.slice(0, 1000);
     await setStatus(userId, id, nextStatus("running", "finish"), { summary });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Recherche fehlgeschlagen.";

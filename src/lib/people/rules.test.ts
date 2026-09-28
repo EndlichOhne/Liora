@@ -1,24 +1,39 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  CONFLICT_NOTE,
   CONVICTED_ONLY,
+  LINK_NOTE,
   NEEDS_SOURCE,
+  NONE_PEOPLE,
   NOT_A_PATTERN,
   NOT_DOCUMENTED,
   NOT_VERIFIED,
   NO_EVALUATION,
   OTHER_ACCOUNT,
+  POSSIBLE_DUPLICATE,
+  PRIVATE_DATA,
   RELATION_NEEDS_SOURCE,
   SAME_NAME,
+  VERIFIED_MEANS,
   WANTED_ONLY,
+  accessDecision,
+  caseCountPhrase,
+  conflictingClaims,
+  decideVerification,
   draftPerson,
+  duplicateScan,
   findMerge,
   linkCase,
   linkSource,
+  linkedChain,
   missingNotes,
   normalizeName,
+  pageWindow,
+  personResearchRequest,
   reviewPerson,
   sameNameNotice,
+  timelineEvent,
   visibleTo,
   type KnownPerson,
 } from "./rules.ts";
@@ -320,5 +335,132 @@ describe("person files", () => {
       region: null,
       sourceUrl: "",
     }, [known({ userId: "user-b", id: "foreign" })]), null);
+  });
+
+  it("marks a similar name as a possible duplicate and never merges a junior", () => {
+    const base = {
+      userId: "user-a",
+      birthYear: null,
+      nationality: null,
+      region: null,
+      sourceUrl: "https://www.bundesgerichtshof.de/andere",
+    };
+    const exact = duplicateScan("user-a", { ...base, displayName: "max mustermann" }, [known({ birthYear: null, sourceUrls: [] })]);
+    assert.equal(exact.kind, "possible");
+    if (exact.kind !== "possible") return;
+    assert.equal(exact.reason, SAME_NAME);
+    const junior = duplicateScan("user-a", { ...base, displayName: "Max Mustermann Jr." }, [known()]);
+    assert.equal(junior.kind, "possible");
+    if (junior.kind !== "possible") return;
+    assert.equal(junior.reason, POSSIBLE_DUPLICATE);
+    assert.equal(findMerge("user-a", { ...base, displayName: "Max Mustermann Jr.", birthYear: 1970 }, [known()]), null);
+  });
+
+  it("keeps a timeline date missing and rejects an invented date", () => {
+    const missing = timelineEvent({
+      label: "Öffentliche Quelle",
+      detail: "Pressemitteilung",
+      occurredOn: "",
+      evidence: "official",
+      sourceId: "source-1",
+    });
+    assert.equal(missing.ok, true);
+    if (!missing.ok) return;
+    assert.equal(missing.event.missingDate, true);
+    assert.equal(missing.event.occurredOn, "");
+    assert.equal(missing.event.confidence, "notable");
+    const bad = timelineEvent({
+      label: "Fall",
+      detail: "",
+      occurredOn: "irgendwann",
+      evidence: "reported",
+      sourceId: "source-1",
+      caseId: "case-1",
+    });
+    assert.equal(bad.ok, false);
+    const none = timelineEvent({
+      label: "Fall",
+      detail: "",
+      occurredOn: "2012",
+      evidence: "court",
+      sourceId: " ",
+    });
+    assert.equal(none.ok, false);
+  });
+
+  it("stores both birth years when sources conflict and does not pick one", () => {
+    const conflicts = conflictingClaims([
+      { field: "birth_year", value: "1980", sourceId: "a" },
+      { field: "birth_year", value: "1981", sourceId: "b" },
+    ]);
+    assert.equal(conflicts.length, 1);
+    assert.equal(conflicts[0]?.left, "1980");
+    assert.equal(conflicts[0]?.right, "1981");
+    const review = decideVerification({
+      actorId: "user-a",
+      personOwnerId: "user-a",
+      sources: [{ evidence: "official", ownerId: "user-a" }, { evidence: "reported", ownerId: "user-a" }],
+      conflicts: 1,
+      outdated: false,
+    });
+    assert.equal(review.ok, true);
+    if (!review.ok) return;
+    assert.equal(review.status, "conflicting");
+    assert.equal(review.note, CONFLICT_NOTE);
+    const partial = decideVerification({
+      actorId: "user-a",
+      personOwnerId: "user-a",
+      sources: [{ evidence: "documented", ownerId: "user-a" }, { evidence: "reported", ownerId: "user-a" }],
+      conflicts: 0,
+      outdated: false,
+    });
+    assert.equal(partial.ok, true);
+    if (!partial.ok) return;
+    assert.equal(partial.status, "partially_verified");
+    const verified = decideVerification({
+      actorId: "user-a",
+      personOwnerId: "user-a",
+      sources: [{ evidence: "court", ownerId: "user-a" }],
+      conflicts: 0,
+      outdated: false,
+    });
+    assert.equal(verified.ok, true);
+    if (!verified.ok) return;
+    assert.equal(verified.status, "verified_public");
+    assert.match(verified.note, /Schuldfeststellung/);
+    assert.equal(VERIFIED_MEANS.includes("keine Schuldfeststellung"), true);
+  });
+
+  it("rejects private contact data and does not create a person from a research request", () => {
+    const blocked = draftPerson({
+      displayName: "Ada Beispiel",
+      aliases: [],
+      role: "publicly_named",
+      birthYear: null,
+      nationality: null,
+      region: null,
+      summary: "Telefon 0171 1234567",
+      sourceUrl: "https://www.swr.de/nachrichten/1",
+      evidence: "reported",
+      sourceRelation: "mentions",
+      origin: "public_source",
+    });
+    assert.equal(blocked.ok, false);
+    if (blocked.ok) return;
+    assert.equal(blocked.error, PRIVATE_DATA);
+    assert.equal(personResearchRequest("Recherchiere Person Ada Beispiel"), "Ada Beispiel");
+    assert.equal(personResearchRequest("was ist ein fall"), null);
+    assert.equal(linkedChain({ personId: "p", caseId: "c", sourceId: "s" }), true);
+    assert.equal(linkedChain({ personId: "p", caseId: "", sourceId: "s" }), false);
+    assert.equal(accessDecision("user-a", "user-b"), "not_found");
+    assert.equal(accessDecision("user-a", null), "not_found");
+    assert.equal(accessDecision("user-a", "user-a"), "allow");
+    assert.equal(caseCountPhrase(4), "4 öffentlich dokumentierte Fallbeziehungen");
+    assert.equal(caseCountPhrase(0), "Keine öffentlich dokumentierte Fallbeziehung.");
+    assert.equal(NONE_PEOPLE, "Keine Personen gefunden.");
+    assert.equal(pageWindow(2).limit, 40);
+    assert.equal(pageWindow(2).offset, 40);
+    assert.equal(pageWindow(1, 80).limit, 40);
+    assert.equal(LINK_NOTE.includes("verknüpft"), true);
   });
 });
